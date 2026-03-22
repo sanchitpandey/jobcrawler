@@ -1,32 +1,21 @@
-"""
-logger.py
-─────────
-Centralised logging for the job crawler pipeline.
-
-Every module imports like:
-    from logger import get_logger
-    log = get_logger(__name__)
-
-Outputs to:
-  - Console (INFO+, coloured)
-  - output/pipeline.log (DEBUG+, full detail, rotates at 5 MB)
-"""
+﻿"""Centralised logging for the job crawler pipeline."""
 
 import logging
-import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-# ── ANSI colours for terminal ──────────────────────────────────────────────────
-_RESET  = "\033[0m"
+from core.settings import get_settings
+
+_RESET = "\033[0m"
 _COLORS = {
-    "DEBUG":    "\033[36m",   # cyan
-    "INFO":     "\033[32m",   # green
-    "WARNING":  "\033[33m",   # yellow
-    "ERROR":    "\033[31m",   # red
-    "CRITICAL": "\033[35m",   # magenta
+    "DEBUG": "\033[36m",
+    "INFO": "\033[32m",
+    "WARNING": "\033[33m",
+    "ERROR": "\033[31m",
+    "CRITICAL": "\033[35m",
 }
+
 
 class _ColourFormatter(logging.Formatter):
     FMT = "%(asctime)s  %(levelname)-8s  %(name)-18s  %(message)s"
@@ -34,13 +23,12 @@ class _ColourFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         colour = _COLORS.get(record.levelname, "")
-        formatter = logging.Formatter(
-            f"{colour}{self.FMT}{_RESET}", datefmt=self.DATEFMT
-        )
+        formatter = logging.Formatter(f"{colour}{self.FMT}{_RESET}", datefmt=self.DATEFMT)
         return formatter.format(record)
 
+
 class _PlainFormatter(logging.Formatter):
-    FMT    = "%(asctime)s  %(levelname)-8s  %(name)-18s  %(message)s"
+    FMT = "%(asctime)s  %(levelname)-8s  %(name)-18s  %(message)s"
     DATEFMT = "%Y-%m-%d %H:%M:%S"
 
     def format(self, record: logging.LogRecord) -> str:
@@ -49,26 +37,27 @@ class _PlainFormatter(logging.Formatter):
 
 _configured = False
 
+
 def _setup():
     global _configured
     if _configured:
         return
     _configured = True
 
-    Path("output").mkdir(exist_ok=True)
+    settings = get_settings()
+    Path(settings.paths.output_dir).mkdir(exist_ok=True)
+
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
-    # Console — INFO and above, coloured
     ch = logging.StreamHandler(sys.stdout)
     ch.setLevel(logging.INFO)
     ch.setFormatter(_ColourFormatter())
     root.addHandler(ch)
 
-    # Rotating file — DEBUG and above, plain text
     fh = RotatingFileHandler(
-        "output/pipeline.log",
-        maxBytes=5 * 1024 * 1024,   # 5 MB
+        str(Path(settings.paths.output_dir) / "pipeline.log"),
+        maxBytes=5 * 1024 * 1024,
         backupCount=3,
         encoding="utf-8",
     )
@@ -76,13 +65,11 @@ def _setup():
     fh.setFormatter(_PlainFormatter())
     root.addHandler(fh)
 
-    # Silence noisy third-party loggers
     for noisy in ["urllib3", "httpx", "httpcore", "playwright", "asyncio"]:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:
     _setup()
-    # Use short names: "jobcrawler.score" → strip leading package path
     short = name.split(".")[-1] if "." in name else name
     return logging.getLogger(f"crawler.{short}")

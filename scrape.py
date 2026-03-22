@@ -1,10 +1,15 @@
-# scrape.py
-from jobspy import scrape_jobs
-from config import SEARCH_TERMS, LOCATION, RESULTS_PER_QUERY, HOURS_OLD, SITES, RAW_CSV
-import pandas as pd
+﻿"""Scrape jobs from supported job boards using JobSpy."""
 
-def run():
-    all_jobs = []
+from __future__ import annotations
+
+import pandas as pd
+from jobspy import scrape_jobs
+
+from config import HOURS_OLD, LOCATION, RAW_CSV, RESULTS_PER_QUERY, SEARCH_TERMS, SITES
+
+
+def run() -> pd.DataFrame:
+    all_jobs: list[pd.DataFrame] = []
     for term in SEARCH_TERMS:
         print(f"  Searching: '{term}'...")
         try:
@@ -18,9 +23,9 @@ def run():
                 linkedin_fetch_description=True,
             )
             all_jobs.append(jobs)
-            print(f"    → {len(jobs)} results")
-        except Exception as e:
-            print(f"    → Error: {e}")
+            print(f"    -> {len(jobs)} results")
+        except Exception as exc:
+            print(f"    -> Error: {exc}")
 
     combined = pd.concat(all_jobs, ignore_index=True)
     combined = combined.dropna(subset=["title", "company"])
@@ -28,8 +33,9 @@ def run():
     combined = combined.drop_duplicates(subset=["job_url"])
     combined = combined.drop_duplicates(subset=["title", "company"])
     combined.to_csv(RAW_CSV, index=False)
-    print(f"  Total unique: {len(combined)} → {RAW_CSV}")
+    print(f"  Total unique: {len(combined)} -> {RAW_CSV}")
     return combined
+
 
 if __name__ == "__main__":
     run()

@@ -1,12 +1,11 @@
-"""
+﻿"""
 review_server.py
-────────────────
 Local Flask web server for reviewing scored jobs and approving a batch.
 
   1. Run: python review_server.py
   2. Open: http://localhost:5055
   3. Review the table, tick the jobs you want to apply to
-  4. Click "Approve Selected" — those jobs are marked 'approved' in the DB
+  4. Click "Approve Selected" â€” those jobs are marked 'approved' in the DB
   5. Run: python apply.py
 
 Filters:
@@ -19,11 +18,10 @@ import sqlite3
 import json
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
-from config import DB_PATH, MIN_REVIEW_SCORE
+from config import DB_PATH, MIN_REVIEW_SCORE, REVIEW_SERVER_PORT
 
 app = Flask(__name__)
 
-# ── DB helpers ─────────────────────────────────────────────────────────────────
 def get_jobs_for_review(verdict_filter: str = "all") -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -76,7 +74,7 @@ def get_stats() -> dict:
     return stats
 
 
-# ── HTML Template ──────────────────────────────────────────────────────────────
+# â”€â”€ HTML Template â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -160,7 +158,7 @@ HTML = """
 <body>
 
 <div class="header">
-  <h1>⚡ Job Review Dashboard</h1>
+  <h1>âš¡ Job Review Dashboard</h1>
   <div class="stats" id="stats-bar"><!-- filled by JS --></div>
 </div>
 
@@ -175,7 +173,7 @@ HTML = """
   <span class="sel-count" id="sel-count">0 selected</span>
   <button class="btn btn-selall" onclick="toggleSelectAll()">Select All</button>
   <button class="btn btn-skip"   onclick="actionSelected('skip')">Skip Selected</button>
-  <button class="btn btn-approve" onclick="actionSelected('approve')">✓ Approve Selected →</button>
+  <button class="btn btn-approve" onclick="actionSelected('approve')">âœ“ Approve Selected â†’</button>
 </div>
 
 <div class="table-wrap">
@@ -194,7 +192,7 @@ HTML = """
     </tr>
   </thead>
   <tbody id="job-table-body">
-    <tr><td colspan="9" class="empty">Loading…</td></tr>
+    <tr><td colspan="9" class="empty">Loadingâ€¦</td></tr>
   </tbody>
 </table>
 </div>
@@ -251,14 +249,14 @@ function renderTable(jobs) {
       <td><input type="checkbox" class="row-check" value="${j.id}"
           onclick="event.stopPropagation(); updateCount()"></td>
       <td><span class="score ${scoreClass(sc)}">${sc}</span></td>
-      <td><span class="badge badge-${j.verdict}">${j.verdict || '—'}</span></td>
+      <td><span class="badge badge-${j.verdict}">${j.verdict || 'â€”'}</span></td>
       <td><div class="company">${escHtml(j.company || '')}</div></td>
       <td><div class="title">${escHtml(j.title || '')}</div></td>
       <td>${escHtml(j.location || '')}</td>
       <td><div class="comp-est">${escHtml(j.comp_est || '?')}</div></td>
       <td><div class="gaps">${gapsHtml}</div></td>
       <td><a class="url-link" href="${escHtml(j.url||'')}" target="_blank"
-          onclick="event.stopPropagation()">Open ↗</a></td>
+          onclick="event.stopPropagation()">Open â†—</a></td>
     </tr>`;
   }).join('');
   updateCount();
@@ -321,7 +319,7 @@ async function actionSelected(action) {
   const data = await res.json();
 
   if (action === 'approve') {
-    showToast(`✓ ${ids.length} job(s) approved — run python apply.py`, '#22c55e');
+    showToast(`âœ“ ${ids.length} job(s) approved â€” run python apply.py`, '#22c55e');
   } else {
     showToast(`Skipped ${ids.length} job(s)`, '#6b7280');
   }
@@ -355,7 +353,7 @@ loadJobs('all');
 """
 
 
-# ── Routes ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route("/")
 def index():
     return render_template_string(HTML)
@@ -393,8 +391,8 @@ def api_skip():
 
 if __name__ == "__main__":
     print("\n  Job Review Server")
-    print("  ─────────────────────────────────────────")
-    print("  Open: http://localhost:5055")
+    print("  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€")
+    print(f"  Open: http://localhost:{REVIEW_SERVER_PORT}")
     print("  After approving, run: python apply.py")
     print("  Press Ctrl+C to stop.\n")
-    app.run(host="127.0.0.1", port=5055, debug=False)
+    app.run(host="127.0.0.1", port=REVIEW_SERVER_PORT, debug=False)
