@@ -1,25 +1,64 @@
-﻿from __future__ import annotations
+"""Apply to approved jobs, routing each one to the correct bot via ats_router."""
+
+from __future__ import annotations
 
 import argparse
 import random
 import sqlite3
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 from config import AUTO_APPLY_DELAY, DB_PATH, MAX_APPLIES_PER_RUN
 from indeed_apply import IndeedApplyBot
 from linkedin_apply import ApplyResult, LinkedInApplyBot
+from greenhouse_apply import GreenhouseApplyBot
+from lever_apply import LeverApplyBot
+from ats_router import ATSType, Difficulty, classify_job
 
 Path("output").mkdir(exist_ok=True)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing tables
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Bot class to instantiate for each ATS type (context managers).
+# ATS types absent from this map have no automation support.
+_BOT_CLASS: dict[ATSType, type] = {
+    ATSType.LINKEDIN_EASY_APPLY: LinkedInApplyBot,
+    ATSType.INDEED:              IndeedApplyBot,
+    ATSType.GREENHOUSE:          GreenhouseApplyBot,
+    ATSType.LEVER:               LeverApplyBot,
+}
+
+# These bots gate on an explicit login() call before applying.
+_LOGIN_REQUIRED: set[ATSType] = {ATSType.LINKEDIN_EASY_APPLY, ATSType.INDEED}
+
+_ATS_LABEL: dict[ATSType, str] = {
+    ATSType.LINKEDIN_EASY_APPLY: "LinkedIn Easy Apply",
+    ATSType.INDEED:              "Indeed",
+    ATSType.GREENHOUSE:          "Greenhouse",
+    ATSType.LEVER:               "Lever",
+    ATSType.ASHBY:               "Ashby",
+    ATSType.WORKDAY:             "Workday",
+    ATSType.ICIMS:               "iCIMS",
+    ATSType.EXTERNAL_UNKNOWN:    "External / Unknown",
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def get_approved_jobs(limit: int = 100) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT id, company, title, location, url, fit_score, comp_est, verdict, gaps
+        SELECT id, company, title, location, url, fit_score, comp_est,
+               verdict, gaps, ats_type, difficulty
         FROM jobs
         WHERE status = 'approved'
         ORDER BY fit_score DESC
@@ -47,33 +86,197 @@ def set_status(job_id: str, status: str, notes: str = "") -> None:
     conn.close()
 
 
-def _platform_of(url: str) -> str:
-    url = url.lower()
-    if "linkedin.com" in url:
-        return "linkedin"
-    if "indeed.com" in url:
-        return "indeed"
-    return "unknown"
+# ─────────────────────────────────────────────────────────────────────────────
+# Classification
+# ─────────────────────────────────────────────────────────────────────────────
 
+def _resolve(job: dict) -> tuple[ATSType, Difficulty]:
+    """
+    Return (ATSType, Difficulty) for a job dict.
+
+    Prefers values already stored in the DB (ats_type / difficulty columns).
+    Falls back to classify_job(url) when the DB columns are blank.
+    """
+    raw_ats  = job.get("ats_type") or ""
+    raw_diff = job.get("difficulty") or ""
+    try:
+        return ATSType(raw_ats), Difficulty(raw_diff)
+    except ValueError:
+        pass
+    return classify_job(job.get("url", ""))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _log(job: dict, result: ApplyResult) -> None:
     icon = {
-        "applied": "[OK]",
-        "already_applied": "[SKIP]",
-        "manual_review": "[FLAG]",
-        "error": "[X]",
-    }.get(result.status, "[?]")
+        "applied":        "[OK]  ",
+        "already_applied":"[SKIP]",
+        "manual_review":  "[FLAG]",
+        "error":          "[X]   ",
+    }.get(result.status, "[?]   ")
     print(
         f"  {icon} [{job['fit_score']:>3.0f}] "
         f"{job['company']:<25} {job['title'][:35]:<35} "
         f"-> {result.status}"
     )
-    if result.manual_questions:
-        for question in result.manual_questions[:3]:
-            print(f"       Manual: {question[:80]}")
+    for q in result.manual_questions[:3]:
+        print(f"         Manual: {q[:80]}")
     if result.error_message:
-        print(f"       Error:  {result.error_message[:120]}")
+        print(f"         Error:  {result.error_message[:120]}")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-job result handler
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _commit(job: dict, result: ApplyResult) -> None:
+    """Persist the ApplyResult back to the DB."""
+    if result.status in ("applied", "already_applied"):
+        set_status(job["id"], "applied")
+    elif result.status == "manual_review":
+        notes = " | ".join(result.manual_questions[:5])
+        set_status(job["id"], "manual_review", notes)
+    else:
+        set_status(job["id"], "error", result.error_message)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bot runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _run_group(
+    ats_type: ATSType,
+    jobs: list[dict],
+    headless: bool,
+    dry_run: bool,
+    ats_stats: dict[ATSType, dict[str, int]],
+) -> None:
+    """
+    Run all jobs for a single ATS type through its bot.
+
+    Updates ats_stats in-place.
+    """
+    if not jobs:
+        return
+
+    label = _ATS_LABEL.get(ats_type, ats_type.value)
+    bot_cls = _BOT_CLASS.get(ats_type)
+
+    if bot_cls is None:
+        # No bot for this ATS type — should have been filtered out before here,
+        # but guard defensively.
+        return
+
+    print(f"\n> {label} [{Difficulty.HYBRID.value if ats_type in {ATSType.GREENHOUSE, ATSType.LEVER, ATSType.ASHBY} else Difficulty.AUTO.value}] ({len(jobs)} jobs)")
+
+    with bot_cls(headless=headless) as bot:
+        if ats_type in _LOGIN_REQUIRED:
+            if not bot.login():
+                print(f"  [X] {label} login failed — skipping all {len(jobs)} jobs")
+                for job in jobs:
+                    ats_stats[ats_type]["error"] += 1
+                    set_status(job["id"], "error", f"{label} login failed")
+                return
+
+        for job in jobs:
+            if dry_run:
+                print(f"  [DRY] {job['company']:<25} {job['title'][:40]}")
+                continue
+
+            result = bot.apply(
+                job_url=job["url"],
+                company=job["company"],
+                title=job["title"],
+            )
+            _log(job, result)
+            _commit(job, result)
+            ats_stats[ats_type][result.status] += 1
+
+            delay = random.uniform(*AUTO_APPLY_DELAY)
+            print(f"         (waiting {delay:.1f}s)")
+            time.sleep(delay)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Summary printer
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _print_summary(
+    ats_stats: dict[ATSType, dict[str, int]],
+    manual_jobs: dict[ATSType, list[dict]],
+) -> None:
+    all_statuses = ["applied", "already_applied", "manual_review", "error"]
+
+    # Aggregate totals
+    totals: dict[str, int] = defaultdict(int)
+    for counts in ats_stats.values():
+        for status, n in counts.items():
+            totals[status] += n
+    for jobs in manual_jobs.values():
+        totals["manual_review"] += len(jobs)
+
+    print("\n" + "=" * 70)
+    print("  RESULTS BY ATS PLATFORM")
+    print("=" * 70)
+
+    # Header
+    col_w = 10
+    header = f"  {'Platform':<24}"
+    for s in all_statuses:
+        header += f"  {s[:col_w]:>{col_w}}"
+    header += f"  {'total':>{col_w}}"
+    print(header)
+    print("  " + "-" * 68)
+
+    # Rows for bots that actually ran
+    for ats_type, counts in ats_stats.items():
+        if not any(counts.values()):
+            continue
+        label = _ATS_LABEL.get(ats_type, ats_type.value)
+        row = f"  {label:<24}"
+        for s in all_statuses:
+            n = counts.get(s, 0)
+            row += f"  {(str(n) if n else '-'):>{col_w}}"
+        row += f"  {sum(counts.values()):>{col_w}}"
+        print(row)
+
+    # Rows for MANUAL-flagged platforms (no bot ran)
+    for ats_type, jobs in manual_jobs.items():
+        if not jobs:
+            continue
+        label = _ATS_LABEL.get(ats_type, ats_type.value)
+        row = f"  {label:<24}"
+        for s in all_statuses:
+            n = len(jobs) if s == "manual_review" else 0
+            row += f"  {(str(n) if n else '-'):>{col_w}}"
+        row += f"  {len(jobs):>{col_w}}"
+        print(row)
+
+    # Totals row
+    print("  " + "-" * 68)
+    row = f"  {'TOTAL':<24}"
+    grand = 0
+    for s in all_statuses:
+        n = totals.get(s, 0)
+        row += f"  {(str(n) if n else '-'):>{col_w}}"
+        grand += n
+    row += f"  {grand:>{col_w}}"
+    print(row)
+
+    # Flag line
+    flagged = totals.get("manual_review", 0)
+    if flagged:
+        print(f"\n  [FLAG] {flagged} jobs need manual attention.")
+        print("         Run: python review_server.py -> filter status='manual_review'")
+    print()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main entry point
+# ─────────────────────────────────────────────────────────────────────────────
 
 def run(dry_run: bool = False, headless: bool = True, limit: int = MAX_APPLIES_PER_RUN) -> None:
     jobs = get_approved_jobs(limit=limit)
@@ -81,103 +284,62 @@ def run(dry_run: bool = False, headless: bool = True, limit: int = MAX_APPLIES_P
         print("No approved jobs found. Run the review server first (python review_server.py).")
         return
 
-    linkedin_jobs = [job for job in jobs if _platform_of(job["url"]) == "linkedin"]
-    indeed_jobs = [job for job in jobs if _platform_of(job["url"]) == "indeed"]
-    unknown_jobs = [job for job in jobs if _platform_of(job["url"]) == "unknown"]
+    # ── Classify every job ───────────────────────────────────────────────────
+    # auto_groups:   ATSType → jobs with a working bot  (AUTO or HYBRID with bot)
+    # manual_groups: ATSType → jobs with no bot or MANUAL difficulty
+    auto_groups:   dict[ATSType, list[dict]] = defaultdict(list)
+    manual_groups: dict[ATSType, list[dict]] = defaultdict(list)
+
+    for job in jobs:
+        ats_type, difficulty = _resolve(job)
+        job["_ats_type"]   = ats_type    # annotate for downstream use
+        job["_difficulty"] = difficulty
+
+        if difficulty == Difficulty.MANUAL or ats_type not in _BOT_CLASS:
+            manual_groups[ats_type].append(job)
+        else:
+            auto_groups[ats_type].append(job)
+
+    # ── Print header ─────────────────────────────────────────────────────────
+    auto_count   = sum(len(v) for v in auto_groups.values())
+    manual_count = sum(len(v) for v in manual_groups.values())
 
     print("\n" + "=" * 55)
     print(f"  AUTO-APPLY  |  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 55)
-    print(
-        f"  Approved: {len(jobs)} jobs "
-        f"(LinkedIn: {len(linkedin_jobs)}, Indeed: {len(indeed_jobs)}, Unknown: {len(unknown_jobs)})"
-    )
+    print(f"  Approved: {len(jobs)} jobs  (automatable: {auto_count}, manual: {manual_count})")
     if dry_run:
-        print("  DRY RUN - no applications will be submitted\n")
+        print("  DRY RUN — no applications will be submitted\n")
 
-    stats = {"applied": 0, "already_applied": 0, "manual_review": 0, "error": 0}
+    # ── Stamp MANUAL jobs immediately ────────────────────────────────────────
+    if manual_groups:
+        print("\n> MANUAL / unsupported platforms — flagging without attempting")
+        for ats_type, group in manual_groups.items():
+            label = _ATS_LABEL.get(ats_type, ats_type.value)
+            for job in group:
+                reason = f"{label} requires manual application (difficulty={job['_difficulty'].value})"
+                print(f"  [FLAG] {job['company']:<25} {job['title'][:40]}")
+                if not dry_run:
+                    set_status(job["id"], "manual_review", reason)
 
-    if linkedin_jobs:
-        print(f"\n> LinkedIn ({len(linkedin_jobs)} jobs)")
-        with LinkedInApplyBot(headless=headless) as bot:
-            if not bot.login():
-                print("  [X] LinkedIn login failed - skipping LinkedIn jobs")
-            else:
-                for job in linkedin_jobs:
-                    if dry_run:
-                        print(f"  [DRY] {job['company']:<25} {job['title'][:40]}")
-                        continue
+    # ── Run bots for AUTO / HYBRID groups ───────────────────────────────────
+    # Track per-ATS result counts for the summary table.
+    ats_stats: dict[ATSType, dict[str, int]] = {
+        t: defaultdict(int) for t in auto_groups
+    }
 
-                    result = bot.apply(job_url=job["url"], company=job["company"], title=job["title"])
-                    _log(job, result)
-                    stats[result.status] = stats.get(result.status, 0) + 1
+    for ats_type, group in auto_groups.items():
+        _run_group(ats_type, group, headless, dry_run, ats_stats)
 
-                    if result.status == "applied":
-                        set_status(job["id"], "applied")
-                    elif result.status == "manual_review":
-                        notes = " | ".join(result.manual_questions[:5])
-                        set_status(job["id"], "manual_review", notes)
-                    elif result.status == "already_applied":
-                        set_status(job["id"], "applied")
-                    else:
-                        set_status(job["id"], "error", result.error_message)
-
-                    delay = random.uniform(*AUTO_APPLY_DELAY)
-                    print(f"       (waiting {delay:.1f}s)")
-                    time.sleep(delay)
-
-    if indeed_jobs:
-        print(f"\n> Indeed ({len(indeed_jobs)} jobs)")
-        with IndeedApplyBot(headless=headless) as bot:
-            if not bot.login():
-                print("  [X] Indeed login failed - skipping Indeed jobs")
-            else:
-                for job in indeed_jobs:
-                    if dry_run:
-                        print(f"  [DRY] {job['company']:<25} {job['title'][:40]}")
-                        continue
-
-                    result = bot.apply(job_url=job["url"], company=job["company"], title=job["title"])
-                    _log(job, result)
-                    stats[result.status] = stats.get(result.status, 0) + 1
-
-                    if result.status == "applied":
-                        set_status(job["id"], "applied")
-                    elif result.status == "manual_review":
-                        notes = " | ".join(result.manual_questions[:5])
-                        set_status(job["id"], "manual_review", notes)
-                    elif result.status == "already_applied":
-                        set_status(job["id"], "applied")
-                    else:
-                        set_status(job["id"], "error", result.error_message)
-
-                    delay = random.uniform(*AUTO_APPLY_DELAY)
-                    print(f"       (waiting {delay:.1f}s)")
-                    time.sleep(delay)
-
-    if unknown_jobs:
-        print(f"\n> Unknown platform ({len(unknown_jobs)} jobs) - flagging as manual_review")
-        for job in unknown_jobs:
-            set_status(job["id"], "manual_review", "Unknown job board - apply manually")
-            print(f"  [FLAG] {job['company']:<25} {job['url']}")
-
-    print("\n" + "-" * 55)
-    print("  Results:")
-    for key, value in stats.items():
-        if value:
-            print(f"    {key:<20} {value}")
-
-    manual_count = stats.get("manual_review", 0) + len(unknown_jobs)
-    if manual_count:
-        print(f"\n  [FLAG] {manual_count} jobs need manual attention.")
-        print("    Run: python review_server.py -> filter by status='manual_review'")
-    print()
+    # ── Print summary table ──────────────────────────────────────────────────
+    _print_summary(ats_stats, manual_groups)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Apply to approved jobs")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate without actually applying")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate without submitting")
     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
-    parser.add_argument("--limit", type=int, default=MAX_APPLIES_PER_RUN, help="Max applications to submit")
+    parser.add_argument("--limit", type=int, default=MAX_APPLIES_PER_RUN,
+                        help="Max applications to submit")
     args = parser.parse_args()
     run(dry_run=args.dry_run, headless=args.headless, limit=args.limit)

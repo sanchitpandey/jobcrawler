@@ -1,16 +1,18 @@
-﻿"""
+"""
 review_server.py
 Local Flask web server for reviewing scored jobs and approving a batch.
 
   1. Run: python review_server.py
   2. Open: http://localhost:5055
   3. Review the table, tick the jobs you want to apply to
-  4. Click "Approve Selected"” those jobs are marked 'approved' in the DB
+  4. Click "Approve Selected" — those jobs are marked 'approved' in the DB
   5. Run: python apply.py
 
 Filters:
   - Shows only jobs with status='new' and fit_score >= MIN_REVIEW_SCORE (default 60)
-  - Status tabs: All / Strong Apply / Apply / Borderline / Manual Review
+  - Verdict tabs: All / Strong Apply / Apply / Borderline
+  - Difficulty tab: Manual Only
+  - Quick Apply All AUTO: one-click approve of every AUTO-difficulty job in view
 """
 
 from __future__ import annotations
@@ -22,42 +24,88 @@ from config import DB_PATH, MIN_REVIEW_SCORE, REVIEW_SERVER_PORT
 
 app = Flask(__name__)
 
-def get_jobs_for_review(verdict_filter: str = "all") -> list[dict]:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_jobs_for_review(
+    verdict_filter: str = "all",
+    difficulty_filter: str = "all",
+) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    base = """
+    sql = """
         SELECT id, company, title, location, url,
-               fit_score, comp_est, verdict, gaps
+               fit_score, comp_est, verdict, gaps,
+               ats_type, difficulty
         FROM   jobs
         WHERE  fit_score >= ? AND status IN ('new', 'manual_review')
     """
-    params = [MIN_REVIEW_SCORE]
-    if verdict_filter != "all":
-        base += " AND verdict = ?"
+    params: list = [MIN_REVIEW_SCORE]
+
+    if verdict_filter not in ("all", ""):
+        sql += " AND verdict = ?"
         params.append(verdict_filter)
-    base += " ORDER BY fit_score DESC LIMIT 200"
-    rows = conn.execute(base, params).fetchall()
+
+    if difficulty_filter not in ("all", ""):
+        sql += " AND difficulty = ?"
+        params.append(difficulty_filter)
+
+    sql += " ORDER BY fit_score DESC LIMIT 200"
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def approve_jobs(job_ids: list[str]):
+def approve_jobs(job_ids: list[str]) -> None:
+    if not job_ids:
+        return
     conn = sqlite3.connect(DB_PATH)
     placeholders = ",".join("?" * len(job_ids))
     conn.execute(
         f"UPDATE jobs SET status='approved' WHERE id IN ({placeholders})",
-        job_ids
+        job_ids,
     )
     conn.commit()
     conn.close()
 
 
-def skip_jobs(job_ids: list[str]):
+def approve_auto_jobs(min_score: int = MIN_REVIEW_SCORE) -> int:
+    """Approve every AUTO-difficulty job that is still pending review."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    ids = [
+        r["id"]
+        for r in conn.execute(
+            """
+            SELECT id FROM jobs
+            WHERE  status IN ('new', 'manual_review')
+              AND  difficulty = 'auto'
+              AND  fit_score  >= ?
+            """,
+            (min_score,),
+        ).fetchall()
+    ]
+    if ids:
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE jobs SET status='approved' WHERE id IN ({placeholders})",
+            ids,
+        )
+        conn.commit()
+    conn.close()
+    return len(ids)
+
+
+def skip_jobs(job_ids: list[str]) -> None:
+    if not job_ids:
+        return
     conn = sqlite3.connect(DB_PATH)
     placeholders = ",".join("?" * len(job_ids))
     conn.execute(
         f"UPDATE jobs SET status='skipped' WHERE id IN ({placeholders})",
-        job_ids
+        job_ids,
     )
     conn.commit()
     conn.close()
@@ -65,14 +113,33 @@ def skip_jobs(job_ids: list[str]):
 
 def get_stats() -> dict:
     conn = sqlite3.connect(DB_PATH)
-    stats = {}
-    for status in ["new", "approved", "applied", "manual_review", "skipped", "error", "interview", "rejected"]:
+    stats: dict = {}
+    for status in [
+        "new", "approved", "applied",
+        "manual_review", "skipped", "error", "interview", "rejected",
+    ]:
         stats[status] = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE status=?", (status,)
         ).fetchone()[0]
+
+    # Count pending AUTO jobs (for the Quick Apply button label)
+    stats["pending_auto"] = conn.execute(
+        """
+        SELECT COUNT(*) FROM jobs
+        WHERE  status IN ('new','manual_review')
+          AND  difficulty = 'auto'
+          AND  fit_score  >= ?
+        """,
+        (MIN_REVIEW_SCORE,),
+    ).fetchone()[0]
+
     conn.close()
     return stats
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTML template
+# ─────────────────────────────────────────────────────────────────────────────
 
 HTML = """
 <!DOCTYPE html>
@@ -88,8 +155,10 @@ HTML = """
     --green: #22c55e; --yellow: #f59e0b; --red: #ef4444; --blue: #3b82f6;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
-         font-size: 14px; line-height: 1.5; }
+  body { background: var(--bg); color: var(--text);
+         font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+
+  /* ── Header ─────────────────────────────────────────────────────────────── */
   .header { padding: 20px 32px; border-bottom: 1px solid var(--border);
             display: flex; align-items: center; justify-content: space-between; }
   .header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
@@ -97,23 +166,35 @@ HTML = """
   .stat { display: flex; flex-direction: column; align-items: center; }
   .stat-num { font-size: 22px; font-weight: 700; }
   .stat-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; }
-  .toolbar { padding: 16px 32px; display: flex; gap: 12px; align-items: center;
+
+  /* ── Toolbar ─────────────────────────────────────────────────────────────── */
+  .toolbar { padding: 12px 32px; display: flex; gap: 10px; align-items: center;
              border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-  .tabs { display: flex; gap: 4px; }
-  .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);
-         background: transparent; color: var(--muted); font-size: 13px; transition: all .15s; }
+  .tab-group { display: flex; gap: 4px; align-items: center; }
+  .tab-sep { width: 1px; height: 24px; background: var(--border); margin: 0 6px; }
+  .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer;
+         border: 1px solid var(--border); background: transparent;
+         color: var(--muted); font-size: 13px; transition: all .15s; }
   .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .tab:hover:not(.active) { border-color: var(--accent); color: var(--text); }
-  .btn { padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 500;
-         cursor: pointer; border: none; transition: all .15s; }
-  .btn-approve { background: var(--green); color: #000; }
+  .tab.active-manual { background: var(--red); color: #fff; border-color: var(--red); }
+  .tab:hover:not(.active):not(.active-manual) { border-color: var(--accent); color: var(--text); }
+
+  .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+         cursor: pointer; border: none; transition: all .15s; white-space: nowrap; }
+  .btn-approve   { background: var(--green);  color: #000; }
   .btn-approve:hover { background: #16a34a; }
-  .btn-skip { background: var(--border); color: var(--muted); }
+  .btn-skip      { background: var(--border); color: var(--muted); }
   .btn-skip:hover { background: #374151; color: var(--text); }
-  .btn-selall { background: transparent; border: 1px solid var(--border);
-                color: var(--muted); }
-  .spacer { flex: 1; }
+  .btn-selall    { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-auto      { background: rgba(34,197,94,.18); color: var(--green);
+                   border: 1px solid rgba(34,197,94,.35); }
+  .btn-auto:hover { background: rgba(34,197,94,.30); }
+  .btn-auto:disabled { opacity: .4; cursor: not-allowed; }
+
+  .spacer    { flex: 1; }
   .sel-count { color: var(--accent); font-weight: 600; font-size: 13px; min-width: 90px; }
+
+  /* ── Table ───────────────────────────────────────────────────────────────── */
   table { width: 100%; border-collapse: collapse; }
   thead th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600;
              text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
@@ -124,55 +205,97 @@ HTML = """
   tbody tr:hover { background: var(--surface); }
   tbody tr.selected { background: rgba(99,102,241,.12); }
   td { padding: 10px 12px; vertical-align: middle; }
-  .score { font-weight: 700; font-size: 16px; }
-  .score.s80 { color: var(--green); }
-  .score.s60 { color: var(--yellow); }
-  .score.s40 { color: #fb923c; }
-  .score.s0  { color: var(--muted); }
+
+  /* ── Score ───────────────────────────────────────────────────────────────── */
+  .score      { font-weight: 700; font-size: 16px; }
+  .score.s80  { color: var(--green); }
+  .score.s60  { color: var(--yellow); }
+  .score.s40  { color: #fb923c; }
+  .score.s0   { color: var(--muted); }
+
+  /* ── Badges ──────────────────────────────────────────────────────────────── */
   .badge { display: inline-block; padding: 2px 8px; border-radius: 4px;
-           font-size: 11px; font-weight: 600; text-transform: uppercase; }
-  .badge-strong_apply { background: rgba(34,197,94,.15); color: var(--green); }
-  .badge-apply        { background: rgba(59,130,246,.15); color: var(--blue); }
+           font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }
+
+  .badge-strong_apply { background: rgba(34,197,94,.15);  color: var(--green); }
+  .badge-apply        { background: rgba(59,130,246,.15);  color: var(--blue); }
   .badge-borderline   { background: rgba(245,158,11,.15); color: var(--yellow); }
   .badge-skip         { background: rgba(107,114,128,.15); color: var(--muted); }
-  .company { font-weight: 600; }
-  .title   { color: var(--muted); font-size: 13px; }
+
+  .ats-linkedin_easy_apply { background: rgba(99,102,241,.18);  color: #818cf8; }
+  .ats-indeed              { background: rgba(59,130,246,.18);  color: var(--blue); }
+  .ats-greenhouse          { background: rgba(34,197,94,.15);   color: var(--green); }
+  .ats-lever               { background: rgba(245,158,11,.15);  color: var(--yellow); }
+  .ats-ashby               { background: rgba(168,85,247,.18);  color: #c084fc; }
+  .ats-workday             { background: rgba(249,115,22,.15);  color: #fb923c; }
+  .ats-icims               { background: rgba(239,68,68,.15);   color: var(--red); }
+  .ats-external_unknown    { background: rgba(107,114,128,.15); color: var(--muted); }
+
+  .diff-auto   { background: rgba(34,197,94,.18);  color: var(--green); }
+  .diff-hybrid { background: rgba(245,158,11,.18); color: var(--yellow); }
+  .diff-manual { background: rgba(239,68,68,.18);  color: var(--red); }
+
+  /* Est. time chip */
+  .time-est { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .time-auto   { color: var(--green); }
+  .time-hybrid { color: var(--yellow); }
+  .time-manual { color: var(--red); }
+
+  /* ── Misc ────────────────────────────────────────────────────────────────── */
+  .company  { font-weight: 600; }
+  .title    { color: var(--muted); font-size: 13px; }
   .comp-est { color: var(--green); font-size: 12px; }
-  .gaps { font-size: 11px; color: var(--muted); max-width: 220px; }
-  .gap-tag { display: inline-block; background: var(--border); border-radius: 4px;
-             padding: 1px 6px; margin: 1px 2px 1px 0; }
+  .gaps     { font-size: 11px; color: var(--muted); max-width: 200px; }
+  .gap-tag  { display: inline-block; background: var(--border); border-radius: 4px;
+              padding: 1px 6px; margin: 1px 2px 1px 0; }
   a.url-link { color: var(--accent); text-decoration: none; font-size: 12px; }
   a.url-link:hover { text-decoration: underline; }
-  .table-wrap { overflow: auto; max-height: calc(100vh - 180px); }
+  .table-wrap { overflow: auto; max-height: calc(100vh - 195px); }
   .toast { position: fixed; bottom: 28px; right: 28px; padding: 12px 22px;
            border-radius: 10px; background: var(--green); color: #000;
            font-weight: 600; font-size: 14px; box-shadow: 0 4px 20px rgba(0,0,0,.4);
            opacity: 0; transform: translateY(10px); transition: all .3s; z-index: 99; }
   .toast.show { opacity: 1; transform: translateY(0); }
-  input[type=checkbox] { width: 16px; height: 16px; cursor: pointer;
-                         accent-color: var(--accent); }
+  input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
   .empty { padding: 60px; text-align: center; color: var(--muted); }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>âš¡ Job Review Dashboard</h1>
+  <h1>&#9889; Job Review Dashboard</h1>
   <div class="stats" id="stats-bar"><!-- filled by JS --></div>
 </div>
 
 <div class="toolbar">
-  <div class="tabs" id="tabs">
-    <button class="tab active" data-filter="all">All</button>
-    <button class="tab" data-filter="strong_apply">Strong Apply</button>
-    <button class="tab" data-filter="apply">Apply</button>
-    <button class="tab" data-filter="borderline">Borderline</button>
+  <!-- Verdict tabs -->
+  <div class="tab-group" id="verdict-tabs">
+    <button class="tab active" data-verdict="all">All</button>
+    <button class="tab" data-verdict="strong_apply">Strong Apply</button>
+    <button class="tab" data-verdict="apply">Apply</button>
+    <button class="tab" data-verdict="borderline">Borderline</button>
   </div>
+
+  <!-- Separator -->
+  <div class="tab-sep"></div>
+
+  <!-- Difficulty tabs -->
+  <div class="tab-group" id="diff-tabs">
+    <button class="tab" data-diff="manual" title="Show only MANUAL-difficulty jobs">
+      Manual Only
+    </button>
+  </div>
+
   <div class="spacer"></div>
+
   <span class="sel-count" id="sel-count">0 selected</span>
   <button class="btn btn-selall" onclick="toggleSelectAll()">Select All</button>
-  <button class="btn btn-skip"   onclick="actionSelected('skip')">Skip Selected</button>
+  <button class="btn btn-skip"    onclick="actionSelected('skip')">Skip Selected</button>
   <button class="btn btn-approve" onclick="actionSelected('approve')">Approve Selected</button>
+  <button class="btn btn-auto"    id="btn-quick-auto" onclick="quickApplyAuto()"
+          title="Approve all AUTO-difficulty jobs that meet the score threshold">
+    Quick Apply All AUTO (<span id="auto-count">&#8230;</span>)
+  </button>
 </div>
 
 <div class="table-wrap">
@@ -186,12 +309,15 @@ HTML = """
       <th>Title</th>
       <th>Location</th>
       <th>Est. Comp</th>
+      <th>ATS</th>
+      <th>Difficulty</th>
+      <th>Est. Time</th>
       <th>Gaps</th>
       <th>Link</th>
     </tr>
   </thead>
   <tbody id="job-table-body">
-    <tr><td colspan="9" class="empty">Loadingâ€¦</td></tr>
+    <tr><td colspan="12" class="empty">Loading&#8230;</td></tr>
   </tbody>
 </table>
 </div>
@@ -200,18 +326,25 @@ HTML = """
 
 <script>
 let allJobs = [];
-let currentFilter = 'all';
+let currentVerdict = 'all';
+let currentDiff    = 'all';   // 'all' | 'auto' | 'hybrid' | 'manual'
 
-async function loadJobs(filter) {
-  currentFilter = filter;
-  const res  = await fetch('/api/jobs?filter=' + filter);
-  allJobs    = await res.json();
+// ── Data loading ─────────────────────────────────────────────────────────────
+
+async function loadJobs() {
+  const params = new URLSearchParams();
+  if (currentVerdict !== 'all') params.set('filter',     currentVerdict);
+  if (currentDiff    !== 'all') params.set('difficulty', currentDiff);
+  const res = await fetch('/api/jobs?' + params.toString());
+  allJobs   = await res.json();
   renderTable(allJobs);
 }
 
 async function loadStats() {
   const res  = await fetch('/api/stats');
   const data = await res.json();
+
+  // Stats bar
   const bar  = document.getElementById('stats-bar');
   const cols = [
     ['new',           data.new,           '#6366f1'],
@@ -220,10 +353,19 @@ async function loadStats() {
     ['manual review', data.manual_review, '#f59e0b'],
   ];
   bar.innerHTML = cols.map(([l, n, c]) =>
-    `<div class="stat"><span class="stat-num" style="color:${c}">${n}</span>
-     <span class="stat-lbl">${l}</span></div>`
+    `<div class="stat">
+       <span class="stat-num" style="color:${c}">${n}</span>
+       <span class="stat-lbl">${l}</span>
+     </div>`
   ).join('');
+
+  // Quick Apply button count
+  const autoCount = data.pending_auto || 0;
+  document.getElementById('auto-count').textContent = autoCount;
+  document.getElementById('btn-quick-auto').disabled = autoCount === 0;
 }
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
 
 function scoreClass(s) {
   if (s >= 80) return 's80';
@@ -232,30 +374,55 @@ function scoreClass(s) {
   return 's0';
 }
 
+function atsLabel(raw) {
+  const map = {
+    linkedin_easy_apply: 'LinkedIn',
+    indeed:              'Indeed',
+    greenhouse:          'Greenhouse',
+    lever:               'Lever',
+    ashby:               'Ashby',
+    workday:             'Workday',
+    icims:               'iCIMS',
+    external_unknown:    'Unknown',
+  };
+  return map[raw] || raw || '—';
+}
+
+function estTime(diff) {
+  const map = { auto: '~2 min', hybrid: '~5 min', manual: '~15 min' };
+  return map[diff] || '?';
+}
+
 function renderTable(jobs) {
   const tbody = document.getElementById('job-table-body');
   if (!jobs.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty">No jobs match this filter.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty">No jobs match this filter.</td></tr>';
     return;
   }
   tbody.innerHTML = jobs.map(j => {
-    const sc    = Math.round(j.fit_score || 0);
-    const gaps  = tryParseGaps(j.gaps);
-    const gapsHtml = gaps.slice(0,3).map(g =>
+    const sc       = Math.round(j.fit_score || 0);
+    const gaps     = tryParseGaps(j.gaps);
+    const gapsHtml = gaps.slice(0, 3).map(g =>
       `<span class="gap-tag">${escHtml(g)}</span>`).join('');
+    const ats  = j.ats_type   || 'external_unknown';
+    const diff = j.difficulty || '';
+    const timeClass = diff ? `time-${diff}` : '';
     return `
     <tr data-id="${j.id}" onclick="toggleRow(this)">
       <td><input type="checkbox" class="row-check" value="${j.id}"
           onclick="event.stopPropagation(); updateCount()"></td>
       <td><span class="score ${scoreClass(sc)}">${sc}</span></td>
-      <td><span class="badge badge-${j.verdict}">${j.verdict || 'â€”'}</span></td>
+      <td><span class="badge badge-${j.verdict}">${escHtml(j.verdict || '—')}</span></td>
       <td><div class="company">${escHtml(j.company || '')}</div></td>
       <td><div class="title">${escHtml(j.title || '')}</div></td>
       <td>${escHtml(j.location || '')}</td>
       <td><div class="comp-est">${escHtml(j.comp_est || '?')}</div></td>
+      <td><span class="badge ats-${ats}">${atsLabel(ats)}</span></td>
+      <td>${diff ? `<span class="badge diff-${diff}">${diff}</span>` : '—'}</td>
+      <td><span class="time-est ${timeClass}">${diff ? estTime(diff) : '—'}</span></td>
       <td><div class="gaps">${gapsHtml}</div></td>
-      <td><a class="url-link" href="${escHtml(j.url||'')}" target="_blank"
-          onclick="event.stopPropagation()">Open â†—</a></td>
+      <td><a class="url-link" href="${escHtml(j.url || '')}" target="_blank"
+          onclick="event.stopPropagation()">Open &#8599;</a></td>
     </tr>`;
   }).join('');
   updateCount();
@@ -268,9 +435,12 @@ function tryParseGaps(raw) {
 }
 
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-                  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// ── Selection ─────────────────────────────────────────────────────────────────
 
 function toggleRow(tr) {
   const cb = tr.querySelector('.row-check');
@@ -306,25 +476,42 @@ function getSelectedIds() {
   return [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
 }
 
+// ── Actions ───────────────────────────────────────────────────────────────────
+
 async function actionSelected(action) {
   const ids = getSelectedIds();
   if (!ids.length) { showToast('Nothing selected', '#f59e0b'); return; }
 
-  const res = await fetch('/api/' + action, {
+  await fetch('/api/' + action, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ids})
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
   });
-  const data = await res.json();
 
   if (action === 'approve') {
-    showToast(`${ids.length} job(s) approved run python apply.py`, '#22c55e');
+    showToast(`${ids.length} job(s) approved — run python apply.py`, '#22c55e');
   } else {
     showToast(`Skipped ${ids.length} job(s)`, '#6b7280');
   }
   await loadStats();
-  await loadJobs(currentFilter);
+  await loadJobs();
 }
+
+async function quickApplyAuto() {
+  const btn = document.getElementById('btn-quick-auto');
+  const count = parseInt(document.getElementById('auto-count').textContent) || 0;
+  if (!count) return;
+
+  btn.disabled = true;
+  const res  = await fetch('/api/approve_auto', { method: 'POST' });
+  const data = await res.json();
+
+  showToast(`${data.approved} AUTO job(s) approved — run python apply.py`, '#22c55e');
+  await loadStats();
+  await loadJobs();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
 
 function showToast(msg, color = '#22c55e') {
   const t = document.getElementById('toast');
@@ -334,22 +521,61 @@ function showToast(msg, color = '#22c55e') {
   setTimeout(() => t.classList.remove('show'), 3500);
 }
 
-// Tab switching
-document.getElementById('tabs').addEventListener('click', e => {
+// ── Tab wiring ────────────────────────────────────────────────────────────────
+
+document.getElementById('verdict-tabs').addEventListener('click', e => {
   const tab = e.target.closest('.tab');
   if (!tab) return;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+  // Clear active state on all verdict tabs (and diff tabs that may be active)
+  document.querySelectorAll('#verdict-tabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#diff-tabs .tab').forEach(t => {
+    t.classList.remove('active', 'active-manual');
+  });
+
   tab.classList.add('active');
-  loadJobs(tab.dataset.filter);
+  currentVerdict = tab.dataset.verdict;
+  currentDiff    = 'all';
+  loadJobs();
 });
 
-// Init
+document.getElementById('diff-tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+
+  const isActive = tab.classList.contains('active-manual');
+
+  // Clear all tab active states
+  document.querySelectorAll('#verdict-tabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#diff-tabs .tab').forEach(t => {
+    t.classList.remove('active', 'active-manual');
+  });
+
+  if (isActive) {
+    // Toggle off — go back to "All"
+    document.querySelector('#verdict-tabs .tab[data-verdict="all"]').classList.add('active');
+    currentVerdict = 'all';
+    currentDiff    = 'all';
+  } else {
+    tab.classList.add('active-manual');
+    currentVerdict = 'all';
+    currentDiff    = tab.dataset.diff;
+  }
+  loadJobs();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
 loadStats();
-loadJobs('all');
+loadJobs();
 </script>
 </body>
 </html>
 """
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routes
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -358,8 +584,9 @@ def index():
 
 @app.route("/api/jobs")
 def api_jobs():
-    verdict_filter = request.args.get("filter", "all")
-    jobs = get_jobs_for_review(verdict_filter)
+    verdict_filter    = request.args.get("filter",     "all")
+    difficulty_filter = request.args.get("difficulty", "all")
+    jobs = get_jobs_for_review(verdict_filter, difficulty_filter)
     return jsonify(jobs)
 
 
@@ -372,17 +599,21 @@ def api_stats():
 def api_approve():
     data = request.get_json()
     ids  = data.get("ids", [])
-    if ids:
-        approve_jobs(ids)
+    approve_jobs(ids)
     return jsonify({"approved": len(ids)})
+
+
+@app.route("/api/approve_auto", methods=["POST"])
+def api_approve_auto():
+    count = approve_auto_jobs()
+    return jsonify({"approved": count})
 
 
 @app.route("/api/skip", methods=["POST"])
 def api_skip():
     data = request.get_json()
     ids  = data.get("ids", [])
-    if ids:
-        skip_jobs(ids)
+    skip_jobs(ids)
     return jsonify({"skipped": len(ids)})
 
 

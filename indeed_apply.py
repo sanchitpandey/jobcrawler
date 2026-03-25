@@ -24,6 +24,7 @@ from playwright.sync_api import (
 from form_filler import answer_question
 from config import INDEED_EMAIL, INDEED_PASSWORD, RESUME_PATH
 from linkedin_apply import ApplyResult   # reuse same dataclass
+from navigator import find_button, find_form_fields
 
 SESSION_FILE  = "output/indeed_session.json"
 RESUME_PATH_OBJ = Path(RESUME_PATH)
@@ -106,26 +107,19 @@ class IndeedApplyBot:
             _human_delay(1.5, 3)
 
             # Detect external apply (company site)
-            ext_btn = page.locator(
-                "button:has-text('Apply on company site'), "
-                "a:has-text('Apply on company site')"
-            ).first
-            if ext_btn.is_visible(timeout=3000):
+            if find_button(page, "apply on company site") is not None:
                 result.status = "manual_review"
                 result.manual_questions = ["External company site — must apply manually"]
                 return result
 
             # Detect "Applied" badge
-            if page.locator("span:has-text('Applied')").count():
+            if find_button(page, "applied") is not None:
                 result.status = "already_applied"
                 return result
 
             # Click "Apply now" (Indeed's own form)
-            apply_btn = page.locator(
-                "button#indeedApplyButton, "
-                "button:has-text('Apply now')"
-            ).first
-            if not apply_btn.is_visible(timeout=5000):
+            apply_btn = find_button(page, "apply now")
+            if apply_btn is None:
                 result.status = "error"
                 result.error_message = "No Apply button found"
                 return result
@@ -165,11 +159,8 @@ class IndeedApplyBot:
                 _human_delay(1.5, 2.5)
 
             # Check for submit
-            submit_btn = page.locator(
-                "button:has-text('Submit your application'), "
-                "button[data-testid='submit-application-button']"
-            ).first
-            if submit_btn.is_visible(timeout=2000):
+            submit_btn = find_button(page, "submit your application")
+            if submit_btn is not None:
                 submit_btn.click()
                 _human_delay(2, 4)
                 result.status = "applied"
@@ -184,12 +175,8 @@ class IndeedApplyBot:
                 return result
 
             # Next / Continue button
-            next_btn = page.locator(
-                "button:has-text('Continue'), "
-                "button:has-text('Next'), "
-                "button[data-testid='form-action-continue']"
-            ).first
-            if next_btn.is_visible(timeout=3000):
+            next_btn = find_button(page, "continue") or find_button(page, "next")
+            if next_btn is not None:
                 next_btn.click()
             else:
                 result.status = "error"
@@ -203,87 +190,64 @@ class IndeedApplyBot:
     def _fill_page(self, page: Page, company: str, title: str) -> list[str]:
         manual: list[str] = []
 
-        # Text inputs
-        for el in page.locator(
-            "input[type='text']:visible, input[type='tel']:visible, textarea:visible"
-        ).all():
-            label = self._label_for(page, el)
-            if not label or el.input_value():
-                continue
-            filled = answer_question(label, "text", company=company, job_title=title)
-            if filled.is_manual_review:
-                manual.append(label)
-            elif filled.value:
-                el.click()
-                _slow_type(page, filled.value)
-                _human_delay(0.3, 0.7)
-
-        # Number inputs
-        for el in page.locator("input[type='number']:visible").all():
-            label = self._label_for(page, el)
-            if not label or el.input_value():
-                continue
-            filled = answer_question(label, "text", company=company, job_title=title)
-            if filled.is_manual_review:
-                manual.append(label)
-            elif filled.value:
-                digits = re.sub(r"[^\d]", "", filled.value)[:6]
-                el.fill(digits)
-                _human_delay(0.3, 0.6)
-
-        # Select dropdowns
-        for el in page.locator("select:visible").all():
-            label = self._label_for(page, el)
+        for field in find_form_fields(page):
+            label = field.label
             if not label:
                 continue
-            options = [o.text_content().strip()
-                       for o in el.locator("option").all()
-                       if o.get_attribute("value") not in ("", None)]
-            filled = answer_question(label, "dropdown", options=options,
-                                     company=company, job_title=title)
-            if filled.is_manual_review:
-                manual.append(label)
-            elif filled.value:
+
+            if field.field_type in ("text", "email", "tel", "textarea"):
                 try:
-                    el.select_option(label=filled.value)
+                    if field.locator.input_value():
+                        continue
                 except Exception:
                     pass
-                _human_delay(0.3, 0.7)
-
-        # Radio buttons
-        for group in page.locator("[role='radiogroup']:visible, fieldset:visible").all():
-            legend_el = group.locator("legend, [role='group'] > span").first
-            legend = legend_el.text_content().strip() if legend_el.count() else ""
-            if not legend:
-                continue
-            labels = [l.text_content().strip()
-                      for l in group.locator("label").all()]
-            filled = answer_question(legend, "radio", options=labels,
-                                     company=company, job_title=title)
-            if filled.is_manual_review:
-                manual.append(legend)
-            elif filled.value:
-                radio = group.locator(f"label:has-text('{filled.value}')").first
-                if radio.is_visible():
-                    radio.click()
+                filled = answer_question(label, "text", company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual.append(label)
+                elif filled.value:
+                    field.locator.click()
+                    _slow_type(page, filled.value)
                     _human_delay(0.3, 0.7)
 
-        return manual
+            elif field.field_type == "number":
+                try:
+                    if field.locator.input_value():
+                        continue
+                except Exception:
+                    pass
+                filled = answer_question(label, "text", company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual.append(label)
+                elif filled.value:
+                    field.locator.fill(re.sub(r"[^\d]", "", filled.value)[:6])
+                    _human_delay(0.3, 0.6)
 
-    def _label_for(self, page: Page, el) -> str:
-        try:
-            for attr in ("aria-label", "placeholder"):
-                val = el.get_attribute(attr)
-                if val:
-                    return val.strip()
-            el_id = el.get_attribute("id")
-            if el_id:
-                lbl = page.locator(f"label[for='{el_id}']").first
-                if lbl.count():
-                    return lbl.text_content().strip()
-        except Exception:
-            pass
-        return ""
+            elif field.field_type == "select":
+                filled = answer_question(label, "dropdown", options=field.options,
+                                         company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual.append(label)
+                elif filled.value:
+                    try:
+                        field.locator.select_option(label=filled.value)
+                    except Exception:
+                        pass
+                    _human_delay(0.3, 0.7)
+
+            elif field.field_type == "radio":
+                filled = answer_question(label, "radio", options=field.options,
+                                         company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual.append(label)
+                elif filled.value:
+                    group = page.locator("fieldset:visible, [role='radiogroup']:visible").filter(has_text=label)
+                    if group.count() > 0:
+                        radio_btn = group.first.locator("label").filter(has_text=filled.value).first
+                        if radio_btn.count() > 0 and radio_btn.is_visible():
+                            radio_btn.click()
+                            _human_delay(0.3, 0.7)
+
+        return manual
 
     def close(self):
         try:

@@ -17,7 +17,7 @@ from providers import chat
 from utils import _precompute_flags
 
 log = get_logger(__name__)
-_BATCH_SIZE = min(BATCH_SIZE, 5)
+_BATCH_SIZE = min(BATCH_SIZE, 3)
 PROFILE_FILE = Path("APPLY_PROFILE.md")
 
 SCORING_RULES = """You are a strict recruiter scoring job listings for a candidate.
@@ -222,7 +222,7 @@ def run() -> pd.DataFrame:
             failed_batches += 1
             log.error("Batch %d failed: %s", batch_num, exc, exc_info=True)
 
-        time.sleep(3)
+        time.sleep(6)
 
     if failed_batches:
         log.warning("%d batch(es) failed. Re-run with --no-scrape to retry only unscored jobs.", failed_batches)

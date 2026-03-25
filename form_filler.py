@@ -7,6 +7,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,12 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 PROFILE_FILE = Path("APPLY_PROFILE.md")
 PROFILE_CONTEXT_FILES = ["APPLY_PROFILE.md"]
 
+CACHE_FILE = Path("output/form_cache.json")
+CACHE_TTL_DAYS = 30
+
+# Module-level in-memory cache; None signals "not loaded from disk yet"
+_answer_cache: dict[str, dict] | None = None
+
 
 def _load_candidate() -> dict[str, str]:
     if not PROFILE_FILE.exists():
@@ -31,6 +38,71 @@ def _load_candidate() -> dict[str, str]:
 
 
 CANDIDATE = _load_candidate()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Answer cache — in-memory + JSON on disk
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cache_key(question: str) -> str:
+    """Normalise a question to a stable cache key: lowercase, collapsed whitespace."""
+    return re.sub(r"\s+", " ", question).strip().lower()
+
+
+def _load_cache() -> dict[str, dict]:
+    """Return the in-memory cache dict, loading from disk on first call."""
+    global _answer_cache
+    if _answer_cache is not None:
+        return _answer_cache
+    if CACHE_FILE.exists():
+        try:
+            _answer_cache = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _answer_cache = {}
+    else:
+        _answer_cache = {}
+    return _answer_cache
+
+
+def _persist_cache() -> None:
+    """Write the in-memory cache to disk atomically."""
+    cache = _load_cache()
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _cache_get(key: str) -> "FilledAnswer | None":
+    """Return a cached FilledAnswer, or None if missing / expired."""
+    entry = _load_cache().get(key)
+    if entry is None:
+        return None
+    if datetime.now() - datetime.fromisoformat(entry["cached_at"]) > timedelta(days=CACHE_TTL_DAYS):
+        del _load_cache()[key]
+        _persist_cache()
+        log.debug("Cache entry expired for key: %r", key[:60])
+        return None
+    log.debug("Cache hit: %r", key[:60])
+    return FilledAnswer(
+        value=entry["value"],
+        source="cache",
+        is_manual_review=entry["is_manual_review"],
+        raw_question=entry["raw_question"],
+        confidence=entry["confidence"],
+    )
+
+
+def _cache_put(key: str, answer: "FilledAnswer") -> None:
+    """Store a FilledAnswer in the in-memory cache and flush to disk."""
+    _load_cache()[key] = {
+        "value": answer.value,
+        "source": answer.source,
+        "is_manual_review": answer.is_manual_review,
+        "raw_question": answer.raw_question,
+        "confidence": answer.confidence,
+        "cached_at": datetime.now().isoformat(),
+    }
+    _persist_cache()
+
 
 STANDARD_PATTERNS: list[tuple[re.Pattern[str], callable]] = [
     (re.compile(r"\bemail\b", re.I), lambda: CANDIDATE["email"]),
@@ -143,6 +215,10 @@ def answer_question(
             else:
                 return FilledAnswer(raw_value, "pattern", raw_question=question)
 
+    cached = _cache_get(_cache_key(question))
+    if cached is not None:
+        return cached
+
     return _ask_groq(question, field_type, options, company, job_title)
 
 
@@ -207,7 +283,9 @@ def _ask_groq(
         else:
             return FilledAnswer("", "manual_review", True, question, 0.0)
 
-    return FilledAnswer(answer, "groq", raw_question=question, confidence=0.85)
+    result = FilledAnswer(answer, "groq", raw_question=question, confidence=0.85)
+    _cache_put(_cache_key(question), result)
+    return result
 
 
 def answer_form(fields: list[dict], company: str = "", job_title: str = "") -> tuple[list[FilledAnswer], list[FilledAnswer]]:

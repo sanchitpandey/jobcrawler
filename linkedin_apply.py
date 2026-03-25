@@ -13,6 +13,8 @@ from playwright.sync_api import BrowserContext, Locator, Page, TimeoutError as P
 
 from config import LINKEDIN_EMAIL, LINKEDIN_PASSWORD, RESUME_PATH
 from form_filler import answer_question
+from navigator import find_button, find_form_fields, find_modal
+from checkpoint import save_checkpoint, load_checkpoint, clear_checkpoint
 
 SESSION_FILE = Path("output/linkedin_session.json")
 RESUME_PATH_OBJ = Path(RESUME_PATH)
@@ -189,7 +191,10 @@ class LinkedInApplyBot:
                 self._save_debug_snapshot(page, company, title, prefix="linkedin_apply_surface_missing")
                 return result
 
-            result = self._handle_modal(page, result)
+            cp_id = _sanitize_slug(job_url)
+            checkpoint = load_checkpoint(cp_id)
+            start_step = checkpoint["step"] if checkpoint else 0
+            result = self._handle_modal(page, result, cp_id=cp_id, start_step=start_step)
             self._context.storage_state(path=str(SESSION_FILE))
         except PWTimeoutError as exc:
             result.status = "error"
@@ -218,39 +223,16 @@ class LinkedInApplyBot:
         _human_delay(0.5, 1.2)
 
     def _is_already_applied(self, page: Page) -> bool:
-        return page.locator("button.jobs-apply-button span:has-text('Applied')").count() > 0 or page.locator("text=Applied").count() > 0
+        return find_button(page, "applied") is not None
 
     def _find_easy_apply_button(self, page: Page) -> Locator | None:
-        selectors = [
-            "button.jobs-apply-button",
-            "a.jobs-apply-button",
-            "button[aria-label*='Easy Apply']",
-            "a[aria-label*='Easy Apply']",
-            "button:has-text('Easy Apply')",
-            "a:has-text('Easy Apply')",
-            ".jobs-apply-button--top-card button",
-            ".jobs-apply-button--top-card a",
-            ".jobs-apply-button button",
-            ".jobs-apply-button a",
-        ]
-
         deadline = time.time() + 15
         while time.time() < deadline:
-            for selector in selectors:
-                locator = page.locator(selector).first
-                if locator.count() == 0:
-                    continue
-                try:
-                    if not locator.is_visible():
-                        continue
-                    label = ((locator.inner_text(timeout=1000) or "") + " " + (locator.get_attribute("aria-label") or "")).lower()
-                    if "easy apply" in label:
-                        return locator
-                except Exception:
-                    continue
+            btn = find_button(page, "easy apply")
+            if btn is not None:
+                return btn
             _human_delay(0.7, 1.1)
             page.mouse.wheel(0, 250)
-
         return None
 
     def _classify_apply_button_failure(self, page: Page, company: str, title: str) -> str:
@@ -300,75 +282,56 @@ class LinkedInApplyBot:
         return False
 
     def _get_modal_scope(self, page: Page):
-        return self._first_visible(page, ["div[role='dialog']", ".artdeco-modal", ".jobs-easy-apply-modal"]) or page
+        return find_modal(page) or page
 
-    def _first_visible(self, page, selectors: list[str]) -> Locator | None:
-        for selector in selectors:
-            try:
-                matches = page.locator(selector)
-                count = matches.count()
-                for idx in range(count):
-                    locator = matches.nth(idx)
-                    if locator.is_visible():
-                        return locator
-            except Exception:
-                continue
-        return None
-
-    def _handle_modal(self, page: Page, result: ApplyResult) -> ApplyResult:
+    def _handle_modal(
+        self,
+        page: Page,
+        result: ApplyResult,
+        cp_id: str = "",
+        start_step: int = 0,
+    ) -> ApplyResult:
         max_steps = 12
+        all_filled: dict[str, str] = {}
 
         for step in range(max_steps):
             _human_delay(0.8, 1.8)
             scope = self._get_modal_scope(page)
 
-            submit_btn = self._first_visible(
-                scope,
-                [
-                    "button[aria-label*='Submit application']",
-                    "button:has-text('Submit application')",
-                    "button:has-text('Submit')",
-                ],
-            )
+            submit_btn = find_button(scope, "submit application")
             if submit_btn is not None:
                 submit_btn.click()
                 _human_delay(2, 4)
                 result.status = "applied"
+                if cp_id:
+                    clear_checkpoint(cp_id)
                 return result
 
-            review_btn = self._first_visible(
-                scope,
-                [
-                    "button[aria-label*='Review']",
-                    "button:has-text('Review your application')",
-                    "button:has-text('Review')",
-                ],
-            )
+            review_btn = find_button(scope, "review your application")
             if review_btn is not None:
                 review_btn.click()
                 continue
 
-            manual_questions = self._fill_step(scope, result.company, result.title)
+            # Steps already completed in a previous run: advance without re-filling
+            if step < start_step:
+                next_btn = find_button(scope, "continue to next step") or find_button(scope, "next")
+                if next_btn is not None:
+                    next_btn.click()
+                    continue
+
+            manual_questions, step_filled = self._fill_step(scope, result.company, result.title)
+            all_filled.update(step_filled)
             result.manual_questions.extend(manual_questions)
             if manual_questions:
                 result.status = "manual_review"
                 self._dismiss_modal(page)
                 return result
 
-            next_btn = self._first_visible(
-                scope,
-                [
-                    "button[aria-label*='Continue to next step']",
-                    "button[aria-label*='Continue']",
-                    "button:has-text('Continue to next step')",
-                    "button:has-text('Continue')",
-                    "button:has-text('Next')",
-                    "footer button.artdeco-button--primary",
-                    ".artdeco-modal__actionbar button.artdeco-button--primary",
-                ],
-            )
+            next_btn = find_button(scope, "continue to next step") or find_button(scope, "next")
             if next_btn is not None:
                 next_btn.click()
+                if cp_id:
+                    save_checkpoint(cp_id, step + 1, all_filled)
                 continue
 
             result.status = "error"
@@ -385,99 +348,79 @@ class LinkedInApplyBot:
         self._dismiss_modal(page)
         return result
 
-    def _fill_step(self, page, company: str, title: str) -> list[str]:
+    def _fill_step(
+        self, page, company: str, title: str
+    ) -> tuple[list[str], dict[str, str]]:
         manual_review_questions: list[str] = []
+        filled_values: dict[str, str] = {}
 
+        # File upload — handled outside find_form_fields since it's not a question field
         upload_input = page.locator("input[type='file']").first
-        has_saved_resume_options = self._first_visible(
-            page,
-            [
-                "button[aria-label*='Download resume']",
-                "button:has-text('Show more resumes')",
-                "button:has-text('Resume')",
-            ],
-        )
-        if has_saved_resume_options is None and upload_input.count() > 0 and upload_input.is_visible() and RESUME_PATH_OBJ.exists():
+        has_saved_resume = find_button(page, "resume")
+        if has_saved_resume is None and upload_input.count() > 0 and upload_input.is_visible() and RESUME_PATH_OBJ.exists():
             try:
                 upload_input.set_input_files(str(RESUME_PATH_OBJ))
                 _human_delay(1, 2)
             except Exception:
                 pass
 
-        for el in page.locator("input[type='text']:visible, textarea:visible").all():
-            label = self._get_label(page, el)
+        for field in find_form_fields(page):
+            label = field.label
             if not label:
                 continue
-            filled = answer_question(label, "text", company=company, job_title=title)
-            if filled.is_manual_review:
-                manual_review_questions.append(label)
-            elif filled.value and not el.input_value():
-                _type_into(el, filled.value)
-                _human_delay(0.3, 0.8)
 
-        for el in page.locator("input[type='number']:visible").all():
-            label = self._get_label(page, el)
-            if not label or el.input_value():
-                continue
-            filled = answer_question(label, "text", company=company, job_title=title)
-            if filled.is_manual_review:
-                manual_review_questions.append(label)
-            elif filled.value:
-                el.fill(re.sub(r"[^\d]", "", filled.value)[:6])
-                _human_delay(0.3, 0.6)
+            if field.field_type in ("text", "email", "tel", "textarea"):
+                try:
+                    if field.locator.input_value():
+                        continue
+                except Exception:
+                    pass
+                filled = answer_question(label, "text", company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual_review_questions.append(label)
+                elif filled.value:
+                    _type_into(field.locator, filled.value)
+                    filled_values[label] = filled.value
+                    _human_delay(0.3, 0.8)
 
-        for el in page.locator("select:visible").all():
-            label = self._get_label(page, el)
-            if not label:
-                continue
-            options = [
-                (option.text_content() or "").strip()
-                for option in el.locator("option").all()
-                if option.get_attribute("value") not in ("", None)
-            ]
-            filled = answer_question(label, "dropdown", options=options, company=company, job_title=title)
-            if filled.is_manual_review:
-                manual_review_questions.append(label)
-            elif filled.value:
-                el.select_option(label=filled.value)
-                _human_delay(0.3, 0.7)
+            elif field.field_type == "number":
+                try:
+                    if field.locator.input_value():
+                        continue
+                except Exception:
+                    pass
+                filled = answer_question(label, "text", company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual_review_questions.append(label)
+                elif filled.value:
+                    digits = re.sub(r"[^\d]", "", filled.value)[:6]
+                    field.locator.fill(digits)
+                    filled_values[label] = digits
+                    _human_delay(0.3, 0.6)
 
-        for fieldset in page.locator("fieldset:visible").all():
-            legend = (fieldset.locator("legend").first.text_content() or "").strip()
-            options = [(label.text_content() or "").strip() for label in fieldset.locator("label").all()]
-            if not legend or not options:
-                continue
-            filled = answer_question(legend, "radio", options=options, company=company, job_title=title)
-            if filled.is_manual_review:
-                manual_review_questions.append(legend)
-            elif filled.value:
-                radio = fieldset.locator(f"label:has-text('{filled.value}')").first
-                if radio.count() > 0 and radio.is_visible():
-                    radio.click()
+            elif field.field_type == "select":
+                filled = answer_question(label, "dropdown", options=field.options, company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual_review_questions.append(label)
+                elif filled.value:
+                    field.locator.select_option(label=filled.value)
+                    filled_values[label] = filled.value
                     _human_delay(0.3, 0.7)
 
-        return manual_review_questions
+            elif field.field_type == "radio":
+                filled = answer_question(label, "radio", options=field.options, company=company, job_title=title)
+                if filled.is_manual_review:
+                    manual_review_questions.append(label)
+                elif filled.value:
+                    group = page.locator("fieldset:visible, [role='radiogroup']:visible").filter(has_text=label)
+                    if group.count() > 0:
+                        radio_btn = group.first.locator("label").filter(has_text=filled.value).first
+                        if radio_btn.count() > 0 and radio_btn.is_visible():
+                            radio_btn.click()
+                            filled_values[label] = filled.value
+                            _human_delay(0.3, 0.7)
 
-    def _get_label(self, page, el: Locator) -> str:
-        try:
-            element_id = el.get_attribute("id")
-            aria_label = el.get_attribute("aria-label")
-            placeholder = el.get_attribute("placeholder")
-
-            if aria_label:
-                return aria_label.strip()
-            if element_id:
-                label = page.locator(f"label[for='{element_id}']").first
-                if label.count() > 0:
-                    return (label.text_content() or "").strip()
-            if placeholder:
-                return placeholder.strip()
-            parent_label = el.locator("xpath=ancestor::label").first
-            if parent_label.count() > 0:
-                return (parent_label.text_content() or "").strip()
-        except Exception:
-            pass
-        return ""
+        return manual_review_questions, filled_values
 
     def _dismiss_modal(self, page: Page) -> None:
         try:
