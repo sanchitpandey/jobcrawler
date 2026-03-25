@@ -5,7 +5,7 @@ Local Flask web server for reviewing scored jobs and approving a batch.
   1. Run: python review_server.py
   2. Open: http://localhost:5055
   3. Review the table, tick the jobs you want to apply to
-  4. Click "Approve Selected" â€” those jobs are marked 'approved' in the DB
+  4. Click "Approve Selected"” those jobs are marked 'approved' in the DB
   5. Run: python apply.py
 
 Filters:
@@ -74,7 +74,6 @@ def get_stats() -> dict:
     return stats
 
 
-# â”€â”€ HTML Template â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -173,7 +172,7 @@ HTML = """
   <span class="sel-count" id="sel-count">0 selected</span>
   <button class="btn btn-selall" onclick="toggleSelectAll()">Select All</button>
   <button class="btn btn-skip"   onclick="actionSelected('skip')">Skip Selected</button>
-  <button class="btn btn-approve" onclick="actionSelected('approve')">âœ“ Approve Selected â†’</button>
+  <button class="btn btn-approve" onclick="actionSelected('approve')">Approve Selected</button>
 </div>
 
 <div class="table-wrap">
@@ -319,7 +318,7 @@ async function actionSelected(action) {
   const data = await res.json();
 
   if (action === 'approve') {
-    showToast(`âœ“ ${ids.length} job(s) approved â€” run python apply.py`, '#22c55e');
+    showToast(`${ids.length} job(s) approved run python apply.py`, '#22c55e');
   } else {
     showToast(`Skipped ${ids.length} job(s)`, '#6b7280');
   }
@@ -352,8 +351,6 @@ loadJobs('all');
 </html>
 """
 
-
-# â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route("/")
 def index():
     return render_template_string(HTML)
@@ -391,7 +388,6 @@ def api_skip():
 
 if __name__ == "__main__":
     print("\n  Job Review Server")
-    print("  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€")
     print(f"  Open: http://localhost:{REVIEW_SERVER_PORT}")
     print("  After approving, run: python apply.py")
     print("  Press Ctrl+C to stop.\n")
