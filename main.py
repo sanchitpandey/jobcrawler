@@ -22,7 +22,7 @@ log = get_logger(__name__)
 session = get_session()
 
 
-def run_pipeline(skip_scrape: bool = False, cover_n: int = 5, limit: int | None = None):
+def run_pipeline(skip_scrape: bool = False, cover_n: int = 5, limit: int | None = None, rescore_model: str | None = None):
     start_time = datetime.now()
     log.info("=" * 60)
     log.info("JOB CRAWLER PIPELINE START - %s", start_time.strftime("%Y-%m-%d %H:%M"))
@@ -65,7 +65,7 @@ def run_pipeline(skip_scrape: bool = False, cover_n: int = 5, limit: int | None 
 
     log.info("STEP 3 - Scoring with %s (%s)", session.provider.name, session.current_model)
     try:
-        scored_df = score.run()
+        scored_df = score.run(rescore_model=rescore_model)
         log.info("Scoring complete - %d rows in scored CSV", len(scored_df))
     except EnvironmentError as e:
         log.error("Environment error: %s", e)
@@ -138,6 +138,8 @@ if __name__ == "__main__":
     parser.add_argument("--covers", type=int, default=5, help="Number of cover letters to generate")
     parser.add_argument("--dashboard", action="store_true", help="Just show dashboard, skip pipeline")
     parser.add_argument("--limit", type=int, default=None, help="Limit jobs processed (debug)")
+    parser.add_argument("--rescore-model", type=str, default=None,
+                        help="Re-score jobs previously scored by this model")
     parser.add_argument("--debug", action="store_true", help="Set console log level to DEBUG")
     args = parser.parse_args()
 
@@ -154,4 +156,4 @@ if __name__ == "__main__":
         init_db()
         print_dashboard()
     else:
-        run_pipeline(skip_scrape=args.no_scrape, cover_n=args.covers, limit=args.limit)
+        run_pipeline(skip_scrape=args.no_scrape, cover_n=args.covers, limit=args.limit, rescore_model=args.rescore_model)

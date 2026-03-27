@@ -110,6 +110,17 @@ def _resolve(job: dict) -> tuple[ATSType, Difficulty]:
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _extract_external_url(result: ApplyResult) -> str:
+    """Parse 'external_apply_url:...' from manual_questions or error_message."""
+    sources = result.manual_questions + ([result.error_message] if result.error_message else [])
+    for text in sources:
+        if "external_apply_url:" in text:
+            url = text.split("external_apply_url:")[-1].strip().split("|")[0].strip()
+            if url:
+                return url
+    return ""
+
+
 def _log(job: dict, result: ApplyResult) -> None:
     icon = {
         "applied":        "[OK]  ",
@@ -191,6 +202,29 @@ def _run_group(
                 company=job["company"],
                 title=job["title"],
             )
+
+            # If LinkedIn returned manual_review due to an external apply URL,
+            # check if that URL belongs to a Greenhouse/Lever board and re-queue.
+            if result.status == "manual_review" and ats_type == ATSType.LINKEDIN_EASY_APPLY:
+                ext_url = _extract_external_url(result)
+                if ext_url:
+                    ext_ats, _ = classify_job(ext_url)
+                    if ext_ats in (ATSType.GREENHOUSE, ATSType.LEVER) and ext_ats in _BOT_CLASS:
+                        # Update DB: point job at the real ATS URL and reset to approved
+                        conn = sqlite3.connect(DB_PATH)
+                        conn.execute(
+                            "UPDATE jobs SET ats_type=?, url=?, status='approved' WHERE id=?",
+                            (ext_ats.value, ext_url, job["id"]),
+                        )
+                        conn.commit()
+                        conn.close()
+                        print(f"         Reclassified as {ext_ats.value} ({ext_url[:60]}) — re-queued for next run")
+                        ats_stats[ats_type]["manual_review"] += 1
+                        delay = random.uniform(*AUTO_APPLY_DELAY)
+                        print(f"         (waiting {delay:.1f}s)")
+                        time.sleep(delay)
+                        continue
+
             _log(job, result)
             _commit(job, result)
             ats_stats[ats_type][result.status] += 1

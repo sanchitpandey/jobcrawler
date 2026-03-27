@@ -122,16 +122,26 @@ def _default_search_terms() -> list[str]:
     if env_terms:
         return env_terms
     return [
-        "ML Engineer LLM",
+        # Tier 1 — high relevance
+        "AI ML Engineer",
+        "Machine Learning Engineer",
         "NLP Engineer",
-        "AI Engineer RAG",
-        "Machine Learning Engineer NLP",
+        "LLM Engineer",
+        "Applied Scientist ML",
+        "AI Engineer",
+        # Tier 2 — adjacent roles
+        "MLOps Engineer",
+        "Deep Learning Engineer",
+        "Data Scientist NLP",
+        "Research Engineer ML",
+        "AI Platform Engineer",
+        "Gen AI Engineer",
     ]
 
 
 def _default_sites() -> list[str]:
     env_sites = _split_csv(os.environ.get("JOB_SITES"))
-    return env_sites or ["linkedin", "indeed", "glassdoor"]
+    return env_sites or ["linkedin", "indeed"]
 
 
 def _default_blacklist_companies() -> list[str]:
@@ -158,6 +168,16 @@ def _default_blacklist_keywords() -> list[str]:
         "body shop", "c2h", "contract to hire", "prompt engineer",
         "prompt engineering", "senior staff", "principal engineer",
         "staff engineer", "distinguished engineer",
+        "data analyst", "business analyst", "bi developer",
+        "power bi", "tableau developer", "etl developer",
+        "data entry", "annotation", "labeling", "labelling",
+        "android developer", "ios developer", "flutter",
+        "react native", "frontend developer", "ui developer",
+        "network engineer", "system administrator", "dba",
+        "manual testing", "qa engineer", "test engineer",
+        "technical writer", "scrum master", "project manager",
+        "sales engineer", "solutions architect", "pre-sales",
+        "customer success", "account manager",
     ]
 
 
@@ -167,7 +187,7 @@ def get_settings() -> Settings:
         search=SearchSettings(
             terms=_default_search_terms(),
             location=os.environ.get("JOB_LOCATION", "India"),
-            results_per_query=_env_int("RESULTS_PER_QUERY", 50),
+            results_per_query=_env_int("RESULTS_PER_QUERY", 80),
             hours_old=_env_int("HOURS_OLD", 72),
             sites=_default_sites(),
         ),

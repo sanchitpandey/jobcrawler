@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(conda run:*)"
+      "Bash(conda run:*)",
+      "Bash(C:/Users/Sanchit/Miniconda3/envs/jobcrawler/python.exe test_a11.py)",
+      "Bash(python -c \"import thefuzz; print\\(''thefuzz ok''\\)\")",
+      "Bash(C:/Users/Sanchit/Miniconda3/envs/jobcrawler/python.exe _test_helpers.py)",
+      "Bash(C:/Users/Sanchit/Miniconda3/envs/jobcrawler/python.exe -c \"import ast; ast.parse\\(open\\(''greenhouse_apply.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(C:/Users/Sanchit/Miniconda3/envs/jobcrawler/python.exe -c \"import ast; ast.parse\\(open\\(''test_greenhouse.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(C:/Users/Sanchit/Miniconda3/envs/jobcrawler/python.exe -c \":*)",
+      "Bash(C:/Users/Sanchit/Miniconda3/envs/jobcrawler/python.exe test_greenhouse.py)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k\\) for k in d if ''''medical'''' in k.lower\\(\\) or ''''institution'''' in k.lower\\(\\) or ''''additional'''' in k.lower\\(\\)]\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import sqlite3; from config import DB_PATH; conn=sqlite3.connect\\(DB_PATH\\); print\\(conn.execute\\(''''PRAGMA table_info\\(jobs\\)''''\\).fetchall\\(\\)\\); conn.close\\(\\)\")",
+      "Bash(python -c \"import form_filler; print\\(''form_filler OK''\\)\")",
+      "Bash(source activate:*)",
+      "Bash(python -c \"from form_filler import _ctc_fallback; print\\(''numeric:'', _ctc_fallback\\(''1500000''\\)\\); print\\(''placeholder:'', _ctc_fallback\\(''Enter your expected compensation range''\\)\\); print\\(''empty:'', _ctc_fallback\\(''''\\)\\)\")",
+      "Bash(python -c \"import review_server; print\\(''OK''\\)\")"
     ]
   }
 }

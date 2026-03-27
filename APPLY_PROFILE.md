@@ -16,8 +16,8 @@ location_current: "Hyderabad, India"
 ## Availability And Compensation
 notice_period: "Available immediately"
 current_ctc: "0"
-expected_ctc: "Enter your expected compensation range"
-expected_ctc_min_lpa: "0"
+expected_ctc: "1500000"
+expected_ctc_min_lpa: "12"
 start_date: "2026-05"
 ## Education
 degree: "B.E., Electronics & Instrumentation Engineering"

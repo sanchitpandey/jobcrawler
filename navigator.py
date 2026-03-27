@@ -121,7 +121,7 @@ def _dom_button_fallback(page: Page, intent: str) -> Locator | None:
 
     for btn in candidates:
         try:
-            if not btn.is_visible():
+            if not btn.bounding_box():
                 continue
             text = (btn.inner_text(timeout=500) or "").strip()
             aria = (btn.get_attribute("aria-label") or "").strip()
@@ -183,22 +183,33 @@ def find_button(page: Page, intent: str) -> Locator | None:
                 best_name = name
 
         if best_score >= FUZZY_THRESHOLD and best_name:
-            # Resolve via ARIA role + name selector (Playwright built-in)
-            try:
-                locator = page.get_by_role("button", name=re.compile(re.escape(best_name), re.IGNORECASE)).first
-                if locator.count() > 0 and locator.is_visible():
-                    return locator
-            except Exception:
-                pass
-            # Also try link role
-            try:
-                locator = page.get_by_role("link", name=re.compile(re.escape(best_name), re.IGNORECASE)).first
-                if locator.count() > 0 and locator.is_visible():
-                    return locator
-            except Exception:
-                pass
+            # Resolve: try intent text first (short, exact), then best_name.
+            # Iterate ALL matches (not just .first) to skip invisible duplicates.
+            for name_to_try in [intent, best_name]:
+                pat = re.compile(re.escape(name_to_try), re.IGNORECASE)
+                for role in ("button", "link"):
+                    try:
+                        for locator in page.get_by_role(role, name=pat).all():
+                            if locator.bounding_box():
+                                return locator
+                    except Exception:
+                        pass
 
     # ── 2. DOM text search fallback ──────────────────────────────────────────
+    # Pre-check: direct :has-text() before expensive fuzzy scan
+    # Cover button, a, and any role='button' element
+    for sel in (
+        f"button:has-text('{intent}')",
+        f"a:has-text('{intent}')",
+        f"[role='button']:has-text('{intent}')",
+    ):
+        try:
+            for el in page.locator(sel).all():
+                if el.bounding_box():
+                    return el
+        except Exception:
+            pass
+
     return _dom_button_fallback(page, intent)
 
 
@@ -206,8 +217,10 @@ def find_form_fields(page: Page) -> list[FormField]:
     """
     Extract all visible form fields with their labels from the current page.
 
-    Uses the accessibility tree to associate labels with controls, then
-    resolves each to a Playwright ``Locator``.
+    Scopes search to the active modal (if any) to avoid picking up background
+    page elements.  Uses ``bounding_box()`` instead of ``:visible`` so that
+    LinkedIn's custom-styled controls (which often lack a native ``type``
+    attribute) are detected correctly.
 
     Returns
     -------
@@ -215,22 +228,70 @@ def find_form_fields(page: Page) -> list[FormField]:
     """
     fields: list[FormField] = []
 
+    # ── Scope to modal so background-page fields are excluded ────────────────
+    scope = find_modal(page) or page
+
     # ── Text / number / email / tel / textarea ───────────────────────────────
-    for input_type, selector in [
-        ("text",     "input[type='text']:visible"),
-        ("number",   "input[type='number']:visible"),
-        ("email",    "input[type='email']:visible"),
-        ("tel",      "input[type='tel']:visible"),
-        ("textarea", "textarea:visible"),
-    ]:
-        for el in page.locator(selector).all():
-            label = _label_for_element(page, el)
-            if not label:
-                continue
-            fields.append(FormField(label=label, field_type=input_type, locator=el))
+    text_candidates = scope.locator(
+        "input:not([type='hidden']):not([type='radio']):not([type='checkbox'])"
+        ":not([type='file']), textarea"
+    ).all()
+    for el in text_candidates:
+        try:
+            tag = el.evaluate("e => e.tagName.toLowerCase()")
+        except Exception:
+            tag = "input"
+
+        if tag == "textarea":
+            input_type = "textarea"
+        else:
+            raw_type = (el.get_attribute("type") or "text").lower()
+            input_type = raw_type if raw_type in (
+                "text", "number", "email", "tel", "search", "url"
+            ) else "text"
+
+        # Skip react-select / styled-component dummy required inputs:
+        # they are type='text' with no id and class names like
+        # 'remix-css-...-requiredInput' or 'css-...-a11yText'.
+        # These are invisible, have no label, and corrupt nth-index counts.
+        el_id = ""
+        el_class = ""
+        try:
+            el_id = el.get_attribute("id") or ""
+            el_class = " ".join(el.get_attribute("class") or "")
+        except Exception:
+            pass
+        if not el_id and ("requiredInput" in el_class or "a11yText" in el_class):
+            continue
+
+        # Build a STABLE locator: use #id when available so that nth-index
+        # drift (caused by react-select injecting DOM nodes during interactions)
+        # never causes us to fill the wrong element.
+        if el_id:
+            stable = page.locator(f"#{el_id}")
+        else:
+            # No id: use aria-label as a unique selector if present
+            el_aria = ""
+            try:
+                el_aria = el.get_attribute("aria-label") or ""
+            except Exception:
+                pass
+            if el_aria:
+                stable = page.locator(f"[aria-label='{el_aria}']").first
+            else:
+                stable = el  # last resort: nth-based
+
+        label = _label_for_element(page, stable)
+        if not label:
+            continue
+        fields.append(FormField(label=label, field_type=input_type, locator=stable))
 
     # ── Select dropdowns ─────────────────────────────────────────────────────
-    for el in page.locator("select:visible").all():
+    for el in scope.locator("select").all():
+        try:
+            pass # Removed bounding_box() check
+        except Exception:
+            continue
         label = _label_for_element(page, el)
         if not label:
             continue
@@ -242,7 +303,11 @@ def find_form_fields(page: Page) -> list[FormField]:
         fields.append(FormField(label=label, field_type="select", locator=el, options=options))
 
     # ── Radio groups / fieldsets ─────────────────────────────────────────────
-    for group in page.locator("[role='radiogroup']:visible, fieldset:visible").all():
+    for group in scope.locator("[role='radiogroup'], fieldset").all():
+        try:
+            pass # Removed bounding_box() check
+        except Exception:
+            continue
         legend_el = group.locator("legend, [role='group'] > span").first
         try:
             legend = (legend_el.text_content() or "").strip() if legend_el.count() else ""
@@ -254,7 +319,6 @@ def find_form_fields(page: Page) -> list[FormField]:
             (lbl.text_content() or "").strip()
             for lbl in group.locator("label").all()
         ]
-        # Use the first radio input inside as the locator anchor
         radio_input = group.locator("input[type='radio']").first
         fields.append(
             FormField(label=legend, field_type="radio", locator=radio_input, options=options)
@@ -289,13 +353,21 @@ def find_modal(page: Page) -> Locator | None:
             except Exception:
                 pass
 
-    # ── 2. DOM fallback ──────────────────────────────────────────────────────
-    try:
-        locator = page.locator("[role='dialog']").first
-        if locator.count() > 0 and locator.is_visible():
-            return locator
-    except Exception:
-        pass
+    # ── 2. DOM fallback — ordered from most-specific to most-generic ─────────
+    for sel in [
+        "[role='dialog']",
+        ".jobs-easy-apply-modal",
+        ".artdeco-modal",
+        "[aria-modal='true']",
+        "[data-test-modal]",
+        "[data-test-modal-container]",
+    ]:
+        try:
+            locator = page.locator(sel).first
+            if locator.count() > 0 and locator.bounding_box():
+                return locator
+        except Exception:
+            continue
 
     return None
 

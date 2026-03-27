@@ -80,7 +80,7 @@ def _hard_reject_by_structure(row: dict, title_norm: str) -> tuple[bool, str]:
     exp_matches = re.findall(r"(\d+)\s*\+?\s*years?\s*(?:of\s*)?(?:experience|exp)", desc_norm)
     if exp_matches:
         min_exp = min(int(match) for match in exp_matches)
-        if min_exp >= 7:
+        if min_exp >= 5:
             return True, f"experience floor: {min_exp}+ yrs"
 
     return False, ""

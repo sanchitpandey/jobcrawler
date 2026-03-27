@@ -12,6 +12,13 @@ from typing import Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 
+try:
+    import google.auth
+    import google.auth.transport.requests
+    _GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    _GOOGLE_AUTH_AVAILABLE = False
+
 load_dotenv()
 log = logging.getLogger("crawler.providers")
 
@@ -34,12 +41,47 @@ class Provider:
         return bool(self.api_key)
 
 
+class VertexAIProvider(Provider):
+    """Provider that uses Google OAuth instead of a static API key."""
+
+    def __init__(self):
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        super().__init__(
+            name="Vertex AI",
+            base_url=(
+                f"https://{location}-aiplatform.googleapis.com/v1beta1"
+                f"/projects/{project}/locations/{location}/endpoints/openapi"
+            ),
+            api_key_env="GOOGLE_CLOUD_PROJECT",
+            models=["google/gemini-2.5-flash-lite"],
+        )
+        self._project = project
+        self._credentials = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self._project) and _GOOGLE_AUTH_AVAILABLE
+
+    @property
+    def api_key(self) -> Optional[str]:
+        """Returns a fresh OAuth access token."""
+        if self._credentials is None:
+            self._credentials, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+        self._credentials.refresh(google.auth.transport.requests.Request())
+        return self._credentials.token
+
+
+PROVIDER_ORDER = ["vertex_ai", "groq", "openrouter", "cerebras", "together"]
+
 PROVIDERS: dict[str, Provider] = {
     "groq": Provider(
         name="Groq",
         base_url="https://api.groq.com/openai/v1",
         api_key_env="GROQ_API_KEY",
-        models=["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"],
+        models=["llama-3.3-70b-versatile"],
     ),
     "openrouter": Provider(
         name="OpenRouter",
@@ -71,19 +113,24 @@ PROVIDERS: dict[str, Provider] = {
 
 
 class LLMSession:
-    def __init__(self, provider: Provider):
-        self.provider = provider
-        self.model_index = 0
+    def __init__(self, providers: list[Provider]):
+        self._providers = providers
+        self._provider_index = 0
         self._client: Optional[OpenAI] = None
-        log.info("LLM session: provider=%s model=%s", provider.name, self.current_model)
+        log.info("LLM session: provider=%s model=%s", self.provider.name, self.current_model)
+
+    @property
+    def provider(self) -> Provider:
+        return self._providers[self._provider_index]
 
     @property
     def current_model(self) -> str:
-        return self.provider.models[self.model_index]
+        return self.provider.models[0]
 
     @property
     def client(self) -> OpenAI:
-        if self._client is None:
+        # VertexAIProvider returns a short-lived OAuth token — rebuild client each call
+        if isinstance(self.provider, VertexAIProvider) or self._client is None:
             self._client = OpenAI(
                 api_key=self.provider.api_key,
                 base_url=self.provider.base_url,
@@ -91,10 +138,15 @@ class LLMSession:
             )
         return self._client
 
-    def _next_model(self) -> bool:
-        if self.model_index + 1 < len(self.provider.models):
-            self.model_index += 1
-            log.warning("Rotating to next model: %s", self.current_model)
+    def _rotate_provider(self) -> bool:
+        exhausted = self._providers[self._provider_index].name
+        if self._provider_index + 1 < len(self._providers):
+            self._provider_index += 1
+            self._client = None  # new provider needs new client
+            log.warning(
+                "Daily limit on %s. Rotating to provider: %s / %s",
+                exhausted, self.provider.name, self.current_model,
+            )
             return True
         return False
 
@@ -120,7 +172,11 @@ class LLMSession:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
-                text = response.choices[0].message.content
+                choice = response.choices[0]
+                if choice.message is None:
+                    reason = getattr(choice, "finish_reason", "unknown")
+                    raise ValueError(f"Null message from model (finish_reason={reason})")
+                text = choice.message.content
                 if text:
                     return text.strip()
                 raise ValueError("Empty response from model")
@@ -131,9 +187,9 @@ class LLMSession:
 
                 if is_rate_limit:
                     if is_daily_limit:
-                        log.warning("Model %s daily limit exhausted. Rotating.", self.current_model)
-                        if not self._next_model():
-                            raise RuntimeError(f"All {self.provider.name} models are exhausted for today.") from exc
+                        log.warning("Model %s daily limit exhausted. Rotating provider.", self.current_model)
+                        if not self._rotate_provider():
+                            raise RuntimeError("All providers are exhausted for today.") from exc
                         continue
 
                     wait = self._parse_wait(error)
@@ -154,6 +210,12 @@ class LLMSession:
 _session: Optional[LLMSession] = None
 
 
+def _make_provider(name: str) -> Provider:
+    if name == "vertex_ai":
+        return VertexAIProvider()
+    return PROVIDERS[name]
+
+
 def get_session() -> LLMSession:
     global _session
     if _session is not None:
@@ -161,25 +223,33 @@ def get_session() -> LLMSession:
 
     desired = os.environ.get("LLM_PROVIDER", "auto").lower()
     if desired == "auto":
-        for name in ["groq", "openrouter", "cerebras", "together"]:
-            provider = PROVIDERS[name]
-            if provider.available:
-                log.info("AUTO selected provider=%s", provider.name)
-                _session = LLMSession(provider)
-                return _session
-        raise EnvironmentError(
-            "No LLM API key found. Set one of GROQ_API_KEY, OPENROUTER_API_KEY, CEREBRAS_API_KEY, or TOGETHER_API_KEY."
+        ordered = [p for name in PROVIDER_ORDER if (p := _make_provider(name)).available]
+        if not ordered:
+            raise EnvironmentError(
+                "No LLM provider available. Set one of: GOOGLE_CLOUD_PROJECT (Vertex AI), "
+                "GROQ_API_KEY, OPENROUTER_API_KEY, CEREBRAS_API_KEY, or TOGETHER_API_KEY."
+            )
+        log.info(
+            "AUTO selected %d provider(s): %s",
+            len(ordered),
+            " -> ".join(f"{p.name}/{p.models[0]}" for p in ordered),
         )
+        _session = LLMSession(ordered)
+        return _session
 
-    if desired not in PROVIDERS:
-        raise ValueError(f"Unknown LLM_PROVIDER='{desired}'. Valid options: {list(PROVIDERS)} or 'auto'.")
-
-    provider = PROVIDERS[desired]
-    if not provider.available:
-        raise EnvironmentError(f"LLM_PROVIDER={desired} but {provider.api_key_env} is not set.")
+    if desired == "vertex_ai":
+        provider = VertexAIProvider()
+        if not provider.available:
+            raise EnvironmentError("LLM_PROVIDER=vertex_ai but GOOGLE_CLOUD_PROJECT is not set.")
+    elif desired not in PROVIDERS:
+        raise ValueError(f"Unknown LLM_PROVIDER='{desired}'. Valid options: vertex_ai, {list(PROVIDERS)}, or 'auto'.")
+    else:
+        provider = PROVIDERS[desired]
+        if not provider.available:
+            raise EnvironmentError(f"LLM_PROVIDER={desired} but {provider.api_key_env} is not set.")
 
     log.info("Using provider: %s | model: %s", provider.name, provider.models[0])
-    _session = LLMSession(provider)
+    _session = LLMSession([provider])
     return _session
 
 

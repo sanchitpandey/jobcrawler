@@ -13,7 +13,7 @@ import pandas as pd
 from config import BATCH_SIZE, FILTERED_CSV, SCORED_CSV
 from core.profile import load_profile_text
 from logger import get_logger
-from providers import chat
+from providers import chat, get_session
 from utils import _precompute_flags
 
 log = get_logger(__name__)
@@ -137,11 +137,24 @@ def _validate(items: list, expected_ids: set[str]) -> list[dict]:
     return validated
 
 
-def _parse_response(raw: str, expected_ids: set[str]) -> list[dict]:
-    text = re.sub(r"<think>.*?</think>", "", raw.strip(), flags=re.DOTALL)
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text).strip()
+def _sanitize_json(text: str) -> str:
+    """Aggressively clean LLM output to make it valid JSON."""
+    # Strip <think> blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Strip markdown fences anywhere in the string
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```\s*", "", text)
+    # Remove single-line comments
+    text = re.sub(r"//[^\n]*", "", text)
+    # Remove trailing commas before } or ]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text.strip()
 
+
+def _parse_response(raw: str, expected_ids: set[str]) -> list[dict]:
+    text = _sanitize_json(raw)
+
+    # Try parsing as a bare object wrapping an array
     if text.startswith("{"):
         try:
             obj = json.loads(text)
@@ -157,14 +170,35 @@ def _parse_response(raw: str, expected_ids: set[str]) -> list[dict]:
         raise ValueError(f"No JSON array in response: {text[:150]!r}")
 
     array_text = text[start:end + 1] if end > start else text[start:]
+
+    # Attempt 1: parse as-is
     try:
-        parsed = json.loads(array_text)
+        return _validate(json.loads(array_text), expected_ids)
     except json.JSONDecodeError:
-        parsed = json.loads(array_text + "]")
-    return _validate(parsed, expected_ids)
+        pass
+
+    # Attempt 2: try appending a closing bracket (truncated response)
+    try:
+        return _validate(json.loads(array_text + "]"), expected_ids)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 3: per-object extraction — salvage whatever parses
+    objects = re.findall(r"\{[^{}]+\}", array_text, re.DOTALL)
+    salvaged: list[dict] = []
+    for obj_str in objects:
+        try:
+            salvaged.append(json.loads(obj_str))
+        except json.JSONDecodeError:
+            pass
+    if salvaged:
+        log.warning("Full array parse failed — salvaged %d/%d objects", len(salvaged), len(objects))
+        return _validate(salvaged, expected_ids)
+
+    raise ValueError(f"Could not parse JSON from response: {text[:200]!r}")
 
 
-def run() -> pd.DataFrame:
+def run(rescore_model: str | None = None) -> pd.DataFrame:
     log.info("=== SCORING START ===")
     if not os.path.exists(FILTERED_CSV):
         raise FileNotFoundError(FILTERED_CSV)
@@ -172,6 +206,11 @@ def run() -> pd.DataFrame:
     profile_text = _load_candidate_profile()
     df = pd.read_csv(FILTERED_CSV)
     log.info("Loaded %d jobs from %s", len(df), FILTERED_CSV)
+
+    if rescore_model and "scored_model" in df.columns:
+        bad = df["scored_model"] == rescore_model
+        df.loc[bad, "fit_score"] = float("nan")
+        log.info("Cleared scores for %d job(s) previously scored by %s", bad.sum(), rescore_model)
 
     if "fit_score" in df.columns:
         to_score = df[df["fit_score"].isna()].copy()
@@ -202,7 +241,7 @@ def run() -> pd.DataFrame:
         prompt = _build_prompt(profile_text, batch)
 
         try:
-            raw = chat(prompt)
+            raw = chat(prompt, max_tokens=8192)
             scores = _parse_response(raw, expected_ids)
             if not scores:
                 log.error("Batch %d - 0 valid scores. Raw: %.200s", batch_num, raw)
@@ -232,6 +271,7 @@ def run() -> pd.DataFrame:
         return df
 
     scores_df = pd.DataFrame(all_scores)
+    scores_df["scored_model"] = get_session().current_model
     scores_df["id"] = scores_df["id"].astype(str)
     to_score["id"] = to_score["id"].astype(str)
     merged_new = to_score.merge(scores_df, on="id", how="left")

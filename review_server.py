@@ -32,27 +32,44 @@ app = Flask(__name__)
 def get_jobs_for_review(
     verdict_filter: str = "all",
     difficulty_filter: str = "all",
+    status_mode: str = "pending",   # "pending" | "approved"
 ) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    sql = """
-        SELECT id, company, title, location, url,
-               fit_score, comp_est, verdict, gaps,
-               ats_type, difficulty
-        FROM   jobs
-        WHERE  fit_score >= ? AND status IN ('new', 'manual_review')
-    """
-    params: list = [MIN_REVIEW_SCORE]
 
-    if verdict_filter not in ("all", ""):
-        sql += " AND verdict = ?"
-        params.append(verdict_filter)
+    if status_mode == "approved":
+        sql = """
+            SELECT id, company, title, location, url,
+                   fit_score, comp_est, verdict, gaps,
+                   ats_type, difficulty
+            FROM   jobs
+            WHERE  status = 'approved'
+        """
+        params: list = []
+        if verdict_filter not in ("all", ""):
+            sql += " AND verdict = ?"
+            params.append(verdict_filter)
+        if difficulty_filter not in ("all", ""):
+            sql += " AND difficulty = ?"
+            params.append(difficulty_filter)
+        sql += " ORDER BY fit_score DESC LIMIT 500"
+    else:
+        sql = """
+            SELECT id, company, title, location, url,
+                   fit_score, comp_est, verdict, gaps,
+                   ats_type, difficulty
+            FROM   jobs
+            WHERE  fit_score >= ? AND status IN ('new', 'manual_review')
+        """
+        params = [MIN_REVIEW_SCORE]
+        if verdict_filter not in ("all", ""):
+            sql += " AND verdict = ?"
+            params.append(verdict_filter)
+        if difficulty_filter not in ("all", ""):
+            sql += " AND difficulty = ?"
+            params.append(difficulty_filter)
+        sql += " ORDER BY fit_score DESC LIMIT 200"
 
-    if difficulty_filter not in ("all", ""):
-        sql += " AND difficulty = ?"
-        params.append(difficulty_filter)
-
-    sql += " ORDER BY fit_score DESC LIMIT 200"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -105,6 +122,20 @@ def skip_jobs(job_ids: list[str]) -> None:
     placeholders = ",".join("?" * len(job_ids))
     conn.execute(
         f"UPDATE jobs SET status='skipped' WHERE id IN ({placeholders})",
+        job_ids,
+    )
+    conn.commit()
+    conn.close()
+
+
+def unapprove_jobs(job_ids: list[str]) -> None:
+    """Move approved jobs back to 'new' so they reappear in the review queue."""
+    if not job_ids:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ",".join("?" * len(job_ids))
+    conn.execute(
+        f"UPDATE jobs SET status='new' WHERE id IN ({placeholders}) AND status='approved'",
         job_ids,
     )
     conn.commit()
@@ -190,6 +221,16 @@ HTML = """
                    border: 1px solid rgba(34,197,94,.35); }
   .btn-auto:hover { background: rgba(34,197,94,.30); }
   .btn-auto:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-unapprove { background: rgba(239,68,68,.18); color: var(--red);
+                   border: 1px solid rgba(239,68,68,.35); }
+  .btn-unapprove:hover { background: rgba(239,68,68,.30); }
+
+  /* Mode toggle (Pending / Approved) */
+  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .mode-btn { padding: 6px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+              background: transparent; border: none; color: var(--muted); transition: all .15s; }
+  .mode-btn.active { background: var(--accent); color: #fff; }
+  .mode-btn:hover:not(.active) { background: var(--surface); color: var(--text); }
 
   .spacer    { flex: 1; }
   .sel-count { color: var(--accent); font-weight: 600; font-size: 13px; min-width: 90px; }
@@ -268,6 +309,15 @@ HTML = """
 </div>
 
 <div class="toolbar">
+  <!-- Mode toggle -->
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="mode-pending" onclick="setMode('pending')">Pending Review</button>
+    <button class="mode-btn"        id="mode-approved" onclick="setMode('approved')">Approved (<span id="approved-count">&#8230;</span>)</button>
+  </div>
+
+  <!-- Separator -->
+  <div class="tab-sep"></div>
+
   <!-- Verdict tabs -->
   <div class="tab-group" id="verdict-tabs">
     <button class="tab active" data-verdict="all">All</button>
@@ -290,12 +340,18 @@ HTML = """
 
   <span class="sel-count" id="sel-count">0 selected</span>
   <button class="btn btn-selall" onclick="toggleSelectAll()">Select All</button>
-  <button class="btn btn-skip"    onclick="actionSelected('skip')">Skip Selected</button>
-  <button class="btn btn-approve" onclick="actionSelected('approve')">Approve Selected</button>
-  <button class="btn btn-auto"    id="btn-quick-auto" onclick="quickApplyAuto()"
+  <!-- Pending-mode actions -->
+  <button class="btn btn-skip"      id="btn-skip"    onclick="actionSelected('skip')">Skip Selected</button>
+  <button class="btn btn-approve"   id="btn-approve" onclick="actionSelected('approve')">Approve Selected</button>
+  <button class="btn btn-auto"      id="btn-quick-auto" onclick="quickApplyAuto()"
           title="Approve all AUTO-difficulty jobs that meet the score threshold">
     Quick Apply All AUTO (<span id="auto-count">&#8230;</span>)
   </button>
+  <!-- Approved-mode actions (hidden by default) -->
+  <button class="btn btn-unapprove" id="btn-unapprove" style="display:none"
+          onclick="actionSelected('unapprove')">Unapprove Selected</button>
+  <button class="btn btn-skip"      id="btn-skip-approved" style="display:none"
+          onclick="actionSelected('skip')">Skip Selected</button>
 </div>
 
 <div class="table-wrap">
@@ -328,6 +384,7 @@ HTML = """
 let allJobs = [];
 let currentVerdict = 'all';
 let currentDiff    = 'all';   // 'all' | 'auto' | 'hybrid' | 'manual'
+let currentMode    = 'pending'; // 'pending' | 'approved'
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -335,6 +392,7 @@ async function loadJobs() {
   const params = new URLSearchParams();
   if (currentVerdict !== 'all') params.set('filter',     currentVerdict);
   if (currentDiff    !== 'all') params.set('difficulty', currentDiff);
+  params.set('mode', currentMode);
   const res = await fetch('/api/jobs?' + params.toString());
   allJobs   = await res.json();
   renderTable(allJobs);
@@ -359,10 +417,31 @@ async function loadStats() {
      </div>`
   ).join('');
 
-  // Quick Apply button count
+  // Quick Apply button count & approved count in mode toggle
   const autoCount = data.pending_auto || 0;
   document.getElementById('auto-count').textContent = autoCount;
   document.getElementById('btn-quick-auto').disabled = autoCount === 0;
+  document.getElementById('approved-count').textContent = data.approved || 0;
+}
+
+// ── Mode toggle ───────────────────────────────────────────────────────────────
+
+function setMode(mode) {
+  currentMode = mode;
+
+  // Update mode button styles
+  document.getElementById('mode-pending').classList.toggle('active',  mode === 'pending');
+  document.getElementById('mode-approved').classList.toggle('active', mode === 'approved');
+
+  // Show/hide action buttons
+  const pending  = mode === 'pending';
+  document.getElementById('btn-skip').style.display          = pending ? '' : 'none';
+  document.getElementById('btn-approve').style.display       = pending ? '' : 'none';
+  document.getElementById('btn-quick-auto').style.display    = pending ? '' : 'none';
+  document.getElementById('btn-unapprove').style.display     = pending ? 'none' : '';
+  document.getElementById('btn-skip-approved').style.display = pending ? 'none' : '';
+
+  loadJobs();
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -490,6 +569,8 @@ async function actionSelected(action) {
 
   if (action === 'approve') {
     showToast(`${ids.length} job(s) approved — run python apply.py`, '#22c55e');
+  } else if (action === 'unapprove') {
+    showToast(`${ids.length} job(s) moved back to review queue`, '#6366f1');
   } else {
     showToast(`Skipped ${ids.length} job(s)`, '#6b7280');
   }
@@ -586,7 +667,8 @@ def index():
 def api_jobs():
     verdict_filter    = request.args.get("filter",     "all")
     difficulty_filter = request.args.get("difficulty", "all")
-    jobs = get_jobs_for_review(verdict_filter, difficulty_filter)
+    status_mode       = request.args.get("mode",       "pending")
+    jobs = get_jobs_for_review(verdict_filter, difficulty_filter, status_mode)
     return jsonify(jobs)
 
 
@@ -615,6 +697,14 @@ def api_skip():
     ids  = data.get("ids", [])
     skip_jobs(ids)
     return jsonify({"skipped": len(ids)})
+
+
+@app.route("/api/unapprove", methods=["POST"])
+def api_unapprove():
+    data = request.get_json()
+    ids  = data.get("ids", [])
+    unapprove_jobs(ids)
+    return jsonify({"unapproved": len(ids)})
 
 
 if __name__ == "__main__":

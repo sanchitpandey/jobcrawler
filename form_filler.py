@@ -14,6 +14,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from groq import Groq
 
+from config import TARGET_COMP_LPA
 from core.profile import load_key_value_profile, load_profile_text
 from logger import get_logger
 
@@ -104,28 +105,44 @@ def _cache_put(key: str, answer: "FilledAnswer") -> None:
     _persist_cache()
 
 
+def _ctc_fallback(raw: str) -> str:
+    """Return raw if it's a parseable positive number; else fall back to TARGET_COMP_LPA × 100000."""
+    try:
+        val = float(re.sub(r"[^\d.]", "", raw))
+        if val > 0:
+            return raw
+    except (ValueError, TypeError):
+        pass
+    return str(TARGET_COMP_LPA * 100_000)
+
+
+# Matches labels that expect a pure integer answer (years / months of experience).
+_YEARS_EXP_LABEL_PATTERN = re.compile(r"\byrs?\b.*exp|\byears?\b.*exp|years? of exp", re.I)
+
+
 STANDARD_PATTERNS: list[tuple[re.Pattern[str], callable]] = [
     (re.compile(r"\bemail\b", re.I), lambda: CANDIDATE["email"]),
     (re.compile(r"\bphone|mobile|contact\b", re.I), lambda: CANDIDATE["phone"]),
     (re.compile(r"\blinkedin\b", re.I), lambda: CANDIDATE["linkedin"]),
     (re.compile(r"\bgithub|portfolio\b", re.I), lambda: CANDIDATE["github"]),
     (re.compile(r"current.*(ctc|salary|comp)|present.*(ctc|salary)", re.I), lambda: CANDIDATE["current_ctc"]),
-    (re.compile(r"expected.*(ctc|salary|comp)|desired.*(ctc|salary)", re.I), lambda: CANDIDATE["expected_ctc"]),
+    (re.compile(r"expected.*(ctc|salary|comp)|desired.*(ctc|salary)", re.I), lambda: _ctc_fallback(CANDIDATE["expected_ctc"])),
     (re.compile(r"notice period|joining period", re.I), lambda: CANDIDATE["notice_period"]),
     (re.compile(r"(when|available).*(start|join)|start date|availability", re.I), lambda: CANDIDATE["start_date"]),
     (re.compile(r"cgpa|gpa|percentage|aggregate", re.I), lambda: CANDIDATE["cgpa"]),
-    (re.compile(r"college|university|institution", re.I), lambda: CANDIDATE["college"]),
+    (re.compile(r"\b(college|university)\b|educational institution|alma mater", re.I), lambda: CANDIDATE["college"]),
     (re.compile(r"graduation year|passing year|batch", re.I), lambda: CANDIDATE.get("graduation_year", CANDIDATE.get("graduation_month_year", ""))),
-    (re.compile(r"\bdegree|qualification\b", re.I), lambda: CANDIDATE["degree"]),
-    (re.compile(r"total.*(experience|exp)|years? of experience", re.I), lambda: CANDIDATE["total_experience"]),
-    (re.compile(r"python.*(years?|exp)", re.I), lambda: CANDIDATE["python_years"]),
-    (re.compile(r"(pytorch|tensorflow).*(years?|exp)", re.I), lambda: CANDIDATE["pytorch_years"]),
-    (re.compile(r"(hugging\s?face|hf|transformers).*(years?|exp)", re.I), lambda: CANDIDATE["huggingface_years"]),
-    (re.compile(r"(llm|rag|nlp|nlu|bert|gpt).*(years?|exp)", re.I), lambda: CANDIDATE.get("llm_nlp_rag_years", CANDIDATE.get("llm_years", ""))),
-    (re.compile(r"(machine learning|ml).*(years?|exp)", re.I), lambda: CANDIDATE["ml_years"]),
+    (re.compile(r"degree|qualification", re.I), lambda: CANDIDATE["degree"]),
+    # Use negative lookbehind or more specific regex to avoid matching "Python experience", "GCP experience"
+    (re.compile(r"^(?:how many )?(?:years of )?(?:total )?(?:work )?experience(?: do you have)?\??$", re.I), lambda: CANDIDATE["total_experience"]),
+    (re.compile(r"python.*(?:years?|exp)", re.I), lambda: CANDIDATE["python_years"]),
+    (re.compile(r"(?:pytorch|tensorflow).*(?:years?|exp)", re.I), lambda: CANDIDATE["pytorch_years"]),
+    (re.compile(r"(?:hugging\s?face|hf|transformers).*(?:years?|exp)", re.I), lambda: CANDIDATE["huggingface_years"]),
+    (re.compile(r"(?:llm|rag|nlp|nlu|bert|gpt).*(?:years?|exp)", re.I), lambda: CANDIDATE.get("llm_nlp_rag_years", CANDIDATE.get("llm_years", ""))),
+    (re.compile(r"(?:machine learning|ml).*(?:years?|exp)", re.I), lambda: CANDIDATE["ml_years"]),
     (re.compile(r"work auth|authorized to work|eligible to work", re.I), lambda: CANDIDATE["work_authorization"]),
-    (re.compile(r"(visa|sponsorship).*(require|need|sponsor)", re.I), lambda: CANDIDATE["sponsorship_required"]),
-    (re.compile(r"(willing|open).*(relocat)|can you relocat", re.I), lambda: CANDIDATE["willing_to_relocate"]),
+    (re.compile(r"(?:visa|sponsorship).*(?:require|need|sponsor)", re.I), lambda: CANDIDATE["sponsorship_required"]),
+    (re.compile(r"(?:willing|open).*(?:relocat)|can you relocat", re.I), lambda: CANDIDATE["willing_to_relocate"]),
     (re.compile(r"\bgender\b", re.I), lambda: CANDIDATE["gender"]),
     (re.compile(r"veteran", re.I), lambda: CANDIDATE["veteran_status"]),
     (re.compile(r"disability|disabled", re.I), lambda: CANDIDATE["disability"]),
@@ -233,12 +250,18 @@ def _ask_groq(
     options_str = (
         f"\nAvailable options (pick exactly one verbatim): {json.dumps(options)}" if options else ""
     )
+    numeric_hint = (
+        " For fields asking years of experience (e.g. 'years of experience', 'yrs of exp'),"
+        " answer with ONLY a number (e.g., '1' or '2')."
+        " Never include text like 'years' or parenthetical explanations."
+    ) if _YEARS_EXP_LABEL_PATTERN.search(question) else ""
     system = (
         "You fill job application forms for a candidate. "
         "Answer only the question asked. "
         "For dropdowns and radio buttons, output exactly one listed option. "
         "For text answers, keep the answer concise. "
         "If a truthful answer requires a personal anecdote or unknown detail, output MANUAL_REVIEW."
+        + numeric_hint
     )
     user = (
         f"Candidate profile:\n{profile}\n\n"
