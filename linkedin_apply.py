@@ -128,6 +128,14 @@ class LinkedInApplyBot:
         """Return an error message if LinkedIn redirected away from the target job page.
 
         Returns None if we appear to be on the correct job detail page.
+
+        Key distinction:
+          - A REAL "Similar Jobs" redirect: the whole page is a job-search/collection page,
+            the URL changes, and the job card (.jobs-unified-top-card) is absent.
+          - A normal job detail page: may have a "Similar jobs" recommendation SECTION at the
+            bottom, but the top card is present and the URL still contains the job ID.
+        We only flag the former.  We deliberately avoid h2/h3 text checks and .jobs-similar-jobs
+        CSS class checks because those match the bottom recommendation section on real job pages.
         """
         # Extract expected job ID from the original URL
         m = re.search(r"/view/(\d+)", job_url)
@@ -141,21 +149,44 @@ class LinkedInApplyBot:
 
         current_url = page.url
 
-        # LinkedIn "Similar Jobs" redirect — the listing expired and LinkedIn shows alternatives
+        # 1. Page title is the most reliable early signal when LinkedIn fully redirects.
+        #    The title "Similar Jobs" or "Jobs | LinkedIn" (generic) combined with other checks.
         if "similar jobs" in page_title.lower():
+            # Debug: save screenshot so we can see what LinkedIn is actually showing.
+            try:
+                slug = _sanitize_slug(expected_id or "unknown")
+                page.screenshot(path=str(DEBUG_DIR / f"redirect_debug_{slug}.png"), full_page=False)
+            except Exception:
+                pass
+            print(f"  [DEBUG redirect] title={page_title!r}  url={current_url[:120]}")
             return (
                 "Job listing no longer available — LinkedIn redirected to 'Similar Jobs' page. "
                 "The posting has likely expired or been removed."
             )
 
-        # If the URL no longer contains the expected job ID, we may be on the wrong page
+        # 2. URL-based redirect detection: the URL changed to a search/collection page.
+        redirect_url_patterns = [
+            "similarJobs=true",
+            "/jobs/collections/",
+            "/jobs/search/",
+        ]
+        for pattern in redirect_url_patterns:
+            if pattern in current_url:
+                return (
+                    "Job listing no longer available — LinkedIn redirected to a job search page. "
+                    "The posting has likely expired or been removed."
+                )
+
+        # 3. Job ID missing from URL + top card absent = we're on the wrong page entirely.
+        #    (We check the top card because on a real job page it is always present.)
         if expected_id and expected_id not in current_url:
-            # Only flag this if we also see search-results indicators (not just a normal redirect)
             try:
-                if page.locator(".jobs-search-results-list, .jobs-search-results__list").count() > 0:
+                top_card_present = page.locator(".jobs-unified-top-card, .job-view-layout").count() > 0
+                if not top_card_present:
+                    # No job card AND URL doesn't have the job ID → redirected away
                     return (
                         f"Job listing no longer available — navigated to job {expected_id} "
-                        f"but landed on a search/listing page ({current_url[:80]})."
+                        f"but the job detail card is absent ({current_url[:80]})."
                     )
             except Exception:
                 pass
@@ -275,63 +306,138 @@ class LinkedInApplyBot:
         or sidebar "Applied X days ago" that appear on external-link jobs.
         """
         try:
-            # LinkedIn's own confirmation banner
-            if page.locator("text='You applied'").count() > 0:
-                return True
+            # LinkedIn's own confirmation banners
+            for banner_text in ("You applied", "Application submitted"):
+                if page.locator(f"text='{banner_text}'").count() > 0:
+                    return True
 
-            # The specific apply button with text "Applied" or aria-label containing "Applied"
+            # Check page-level banners/notifications scoped to the job card area
+            for selector in [
+                ".jobs-details-top-card__apply-error",
+                ".artdeco-inline-feedback",
+                ".jobs-s-apply",
+            ]:
+                try:
+                    el = page.locator(selector).first
+                    if el.count() > 0:
+                        text = (el.inner_text(timeout=500) or "").lower()
+                        if "application submitted" in text or "you applied" in text:
+                            return True
+                except Exception:
+                    pass
+
+            # The specific apply button with text "Applied"/"Application submitted"
+            # or aria-label indicating already applied
             apply_btn = page.locator("button.jobs-apply-button").first
             if apply_btn.count() > 0:
                 try:
                     text = (apply_btn.inner_text(timeout=500) or "").strip().lower()
-                    if text == "applied":
+                    if text in ("applied", "application submitted"):
                         return True
                     aria = (apply_btn.get_attribute("aria-label") or "").lower()
-                    if "applied" in aria and "easy apply" not in aria:
+                    if ("applied" in aria or "submitted" in aria) and "easy apply" not in aria:
                         return True
                 except Exception:
                     pass
 
-            # Disabled apply button that explicitly says Applied
+            # Disabled apply button that says Applied or Application submitted
             if page.locator("button.jobs-apply-button:disabled:has-text('Applied')").count() > 0:
+                return True
+            if page.locator("button.jobs-apply-button:disabled:has-text('Application submitted')").count() > 0:
                 return True
         except Exception:
             pass
         return False
 
     def _find_easy_apply_button(self, page: Page) -> Locator | None:
-        card = page.locator(".jobs-unified-top-card, .job-view-layout").first
-        scope = card if card.count() > 0 else page
+        """Find the Easy Apply button on the job detail page.
 
+        LinkedIn's new design uses obfuscated CSS classes, so we rely exclusively on
+        aria-label and text content.  The old .jobs-unified-top-card / .jobs-apply-button
+        class selectors no longer exist.
+
+        To avoid picking up "Easy Apply" links from the "Similar jobs" recommendation
+        section at the bottom of the page, we scroll back to the top each iteration and
+        only bail on URL-pattern changes (not heading text).
+        """
         deadline = time.time() + 15
+
         while time.time() < deadline:
-            try:
-                btn = scope.locator("button.jobs-apply-button:has-text('Easy Apply')").first
-                if btn.count() > 0 and btn.bounding_box():
-                    return btn
-                
-                for el in scope.locator("button, [role='button']").all():
-                    if el.bounding_box():
-                        text = (el.inner_text(timeout=500) or "").strip().lower()
-                        if text == "easy apply":
-                            return el
-            except Exception:
-                pass
-                
-            btn = find_button(scope if card.count() > 0 else page, "easy apply")
+            # Safety net: if the SPA redirected away (URL changed to search/collections), bail fast.
+            # We do NOT check h2/h3 text or .jobs-similar-jobs here because those selectors also
+            # match the "Similar jobs" recommendation section at the bottom of real job detail pages.
+            current_url = page.url
+            if any(p in current_url for p in ("similarJobs=true", "/jobs/collections/", "/jobs/search/")):
+                return None
+
+            # Strategy 1: aria-label is the most reliable selector in LinkedIn's new design.
+            # "Easy Apply to this job" is the aria-label on the top-card button.
+            for aria_sel in (
+                "a[aria-label='Easy Apply to this job']",
+                "button[aria-label='Easy Apply to this job']",
+                "[aria-label*='Easy Apply']",
+            ):
+                try:
+                    btn = page.locator(aria_sel).first
+                    if btn.count() > 0:
+                        bb = btn.bounding_box()
+                        if bb:
+                            return btn
+                except Exception:
+                    pass
+
+            # Strategy 2: old-style class-based selectors (still work on some pages).
+            card = page.locator(".jobs-unified-top-card, .job-view-layout").first
+            if card.count() > 0:
+                try:
+                    for sel in (
+                        "button.jobs-apply-button:has-text('Easy Apply')",
+                        "a.jobs-apply-button:has-text('Easy Apply')",
+                    ):
+                        btn = card.locator(sel).first
+                        if btn.count() > 0 and btn.bounding_box():
+                            return btn
+
+                    for el in card.locator("button, [role='button'], a").all():
+                        if el.bounding_box():
+                            text = (el.inner_text(timeout=500) or "").strip().lower()
+                            if text == "easy apply":
+                                return el
+                except Exception:
+                    pass
+
+            # Strategy 3: navigator fallback — check the a11y tree.
+            btn = find_button(page, "easy apply")
             if btn is not None:
                 try:
+                    # Verify the button's aria-label is the job-specific one, not a card
+                    # from the "Similar jobs" section (those links have no aria-label or a
+                    # different one).
+                    aria = (btn.get_attribute("aria-label") or "").lower()
                     text = (btn.inner_text(timeout=500) or "").strip().lower()
-                    if "easy" in text:
+                    if aria == "easy apply to this job" or text == "easy apply":
                         return btn
                 except Exception:
                     pass
+
+            # Wait briefly and scroll up to ensure the top card is visible for next check.
             _human_delay(0.7, 1.1)
-            page.mouse.wheel(0, 250)
+            page.mouse.wheel(0, -500)  # scroll up to keep the top card in view
+
         return None
 
     def _classify_apply_button_failure(self, page: Page, company: str, title: str) -> str:
         self._save_debug_snapshot(page, company, title)
+
+        # Check for a URL-based Similar Jobs / search redirect first.
+        # We avoid h2/h3 text or .jobs-similar-jobs CSS checks because those also match the
+        # "Similar jobs" recommendation section visible at the bottom of real job detail pages.
+        current_url = page.url
+        if any(p in current_url for p in ("similarJobs=true", "/jobs/collections/", "/jobs/search/")):
+            return (
+                "Job listing no longer available — LinkedIn redirected to a job search page. "
+                "The posting has likely expired or been removed."
+            )
 
         ext_btn = page.locator("button:has-text('Apply'), a:has-text('Apply')").first
         if ext_btn.count() > 0:
@@ -410,6 +516,8 @@ class LinkedInApplyBot:
             submit_btn = find_button(scope, "submit application")
             if submit_btn is not None:
                 submit_btn.click()
+                _human_delay(1.5, 2.5)  # wait for "Application sent!" success modal
+                self._dismiss_modal(page)  # close modal before next page.goto()
                 result.status = "applied"
                 return result
 
@@ -616,6 +724,14 @@ class LinkedInApplyBot:
 
     def _dismiss_modal(self, page: Page) -> None:
         try:
+            # "Done" closes the "Application sent!" success modal after submit.
+            # It won't exist during an in-progress application, so this is safe.
+            done_btn = page.locator("button:has-text('Done')").first
+            if done_btn.count() > 0 and done_btn.is_visible():
+                done_btn.click()
+                _human_delay(0.5, 1)
+                return
+
             dismiss = page.locator("button[aria-label='Dismiss'], button[aria-label='Dismiss application']").first
             if dismiss.count() > 0 and dismiss.is_visible():
                 dismiss.click()

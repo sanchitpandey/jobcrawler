@@ -88,6 +88,7 @@ PROVIDERS: dict[str, Provider] = {
         base_url="https://openrouter.ai/api/v1",
         api_key_env="OPENROUTER_API_KEY",
         models=[
+            "google/gemini-2.5-flash-lite",
             "meta-llama/llama-3.3-70b-instruct:free",
             "mistralai/mistral-small-3.1-24b-instruct:free",
             "google/gemma-3-27b-it:free",

@@ -15,7 +15,17 @@
       "Bash(python -c \"import form_filler; print\\(''form_filler OK''\\)\")",
       "Bash(source activate:*)",
       "Bash(python -c \"from form_filler import _ctc_fallback; print\\(''numeric:'', _ctc_fallback\\(''1500000''\\)\\); print\\(''placeholder:'', _ctc_fallback\\(''Enter your expected compensation range''\\)\\); print\\(''empty:'', _ctc_fallback\\(''''\\)\\)\")",
-      "Bash(python -c \"import review_server; print\\(''OK''\\)\")"
+      "Bash(python -c \"import review_server; print\\(''OK''\\)\")",
+      "Bash(sqlite3 jobs.db \"SELECT id, company, title, status FROM jobs WHERE status=''manual_review'' AND \\(company LIKE ''%methdai%'' OR company LIKE ''%smart working%'' OR company LIKE ''%exl%''\\) COLLATE NOCASE;\")",
+      "Bash(sqlite3 jobs.db \"SELECT id, company, title, status FROM jobs WHERE status=''manual_review'' AND \\(lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%''\\);\")",
+      "Bash(sqlite3 jobs.db \".tables\")",
+      "Bash(sqlite3 output/jobs.db \".tables\")",
+      "Bash(sqlite3 output/tracker.db \".tables\")",
+      "Bash(sqlite3 output/tracker.db \"SELECT id, company, title, status FROM jobs WHERE status=''manual_review'' AND \\(lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%''\\);\")",
+      "Bash(sqlite3 output/tracker.db \"UPDATE jobs SET status=''approved'' WHERE status=''manual_review'' AND \\(lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%''\\); SELECT changes\\(\\) || '' rows updated'';\")",
+      "Bash(sqlite3 d:/AIML/jobcrawler/output/tracker.db \"SELECT id, company, title, status FROM jobs WHERE lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%'';\")",
+      "Bash(sqlite3 d:/AIML/jobcrawler/output/tracker.db \":*)",
+      "Bash(sort -k6,7 -r)"
     ]
   }
 }
