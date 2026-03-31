@@ -33,9 +33,9 @@ from playwright.sync_api import (
 from thefuzz import fuzz
 
 from config import RESUME_PATH
-from form_filler import answer_question
+from form_filler import answer_question, clear_qa_log, get_qa_log, start_qa_log
 from navigator import find_button, find_form_fields, find_file_upload
-from linkedin_apply import ApplyResult  # reuse same dataclass
+from core.models import ApplyResult
 
 SESSION_FILE = Path("output/greenhouse_session.json")
 RESUME_PATH_OBJ = Path(RESUME_PATH)
@@ -309,6 +309,7 @@ class GreenhouseApplyBot:
         title: str = "",
     ) -> ApplyResult:
         page = self._page
+        start_qa_log()
         result = ApplyResult(status="error", job_url=job_url, company=company, title=title)
 
         try:
@@ -344,6 +345,9 @@ class GreenhouseApplyBot:
             result.status = "error"
             result.error_message = str(exc)
             self._save_debug_snapshot(page, company, title, prefix="greenhouse_exception")
+        finally:
+            result.qa_log = get_qa_log()
+            clear_qa_log()
 
         return result
 

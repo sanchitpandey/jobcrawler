@@ -28,6 +28,7 @@ CACHE_TTL_DAYS = 30
 
 # Module-level in-memory cache; None signals "not loaded from disk yet"
 _answer_cache: dict[str, dict] | None = None
+_current_qa_log: dict[str, str] | None = None
 
 
 def _load_candidate() -> dict[str, str]:
@@ -165,6 +166,26 @@ class FilledAnswer:
     confidence: float = 1.0
 
 
+def start_qa_log() -> None:
+    global _current_qa_log
+    _current_qa_log = {}
+
+
+def get_qa_log() -> dict[str, str]:
+    return dict(_current_qa_log or {})
+
+
+def clear_qa_log() -> None:
+    global _current_qa_log
+    _current_qa_log = None
+
+
+def _record_qa_answer(question: str, answer: FilledAnswer) -> FilledAnswer:
+    if _current_qa_log is not None and question.strip():
+        _current_qa_log[question.strip()] = "MANUAL_REVIEW" if answer.is_manual_review else answer.value
+    return answer
+
+
 def _get_profile() -> str:
     global _profile_text
     if _profile_text is None:
@@ -218,7 +239,7 @@ def answer_question(
     log.debug("Answering question: %r", question[:80])
 
     if MANUAL_REVIEW_PATTERNS.search(question):
-        return FilledAnswer("", "manual_review", True, question)
+        return _record_qa_answer(question, FilledAnswer("", "manual_review", True, question))
 
     for pattern, answer_fn in STANDARD_PATTERNS:
         if pattern.search(question):
@@ -226,18 +247,18 @@ def answer_question(
             if options:
                 matched = _match_option(raw_value, options)
                 if matched:
-                    return FilledAnswer(matched, "pattern", raw_question=question)
+                    return _record_qa_answer(question, FilledAnswer(matched, "pattern", raw_question=question))
             else:
-                return FilledAnswer(raw_value, "pattern", raw_question=question)
+                return _record_qa_answer(question, FilledAnswer(raw_value, "pattern", raw_question=question))
 
     # When a validation error is present, bypass the cache so the LLM sees the
     # error context and can correct its previous answer.
     if not validation_error:
         cached = _cache_get(_cache_key(question))
         if cached is not None:
-            return cached
+            return _record_qa_answer(question, cached)
 
-    return _ask_llm(question, field_type, options, company, job_title, validation_error)
+    return _record_qa_answer(question, _ask_llm(question, field_type, options, company, job_title, validation_error))
 
 
 def _ask_llm(

@@ -7,11 +7,12 @@ import os
 import re
 import time
 from pathlib import Path
+from string import Template
 
 import pandas as pd
 
 from config import BATCH_SIZE, FILTERED_CSV, SCORED_CSV
-from core.profile import load_profile_text
+from core.profile import load_key_value_profile, load_profile_text
 from logger import get_logger
 from providers import chat, get_session
 from utils import _precompute_flags
@@ -20,7 +21,7 @@ log = get_logger(__name__)
 _BATCH_SIZE = min(BATCH_SIZE, 3)
 PROFILE_FILE = Path("APPLY_PROFILE.md")
 
-SCORING_RULES = """You are a strict recruiter scoring job listings for a candidate.
+PROMPT_TEMPLATE = Template("""You are a strict recruiter scoring job listings for a candidate.
 
 Use the candidate profile below as the only source of truth for background, strengths, preferences, constraints, seniority, compensation expectations, and target roles.
 
@@ -33,7 +34,7 @@ MANDATORY PENALTIES (apply these first):
 6. Short contract penalty: if the contract ends before the candidate's stated availability or job search preference window, score must be below 45.
 7. Infra/devops penalty: if the role is mainly infra/devops instead of ML, score must be below 40 unless the profile explicitly targets platform roles.
 8. Experience gap penalty: if minimum experience is materially above the candidate's full-time experience, cap aggressively.
-
+$mandatory_boosts
 SCORING RUBRIC:
 85-100: excellent match to candidate goals, stack, seniority, and constraints
 65-84: strong match with manageable gaps
@@ -48,22 +49,221 @@ VERDICT MAPPING:
 
 OUTPUT: Return only a valid JSON array.
 [
-  {{
+  {
     "id": "<copy id field exactly>",
     "fit_score": 0,
     "comp_estimate": "candidate-aligned compensation estimate",
     "verdict": "strong_apply|apply|borderline|skip",
     "gaps": ["specific missing requirement", "up to 3 total"],
     "why": "one sentence summary"
-  }}
+  }
 ]
-"""
+""")
+
+_DEFAULT_JUNIOR_SIGNALS = [
+    "foundational hire",
+    "how you think",
+    "curiosity",
+    "early-stage",
+    "welcomes junior candidates",
+]
+_POINT_DEFAULTS = {
+    "niche": 15,
+    "trending": 15,
+    "junior": 10,
+}
+_POINT_MAX = 30
+_NICHE_HINT_KEYWORDS = [
+    ("RAG", "rag"),
+    ("FAISS", "faiss"),
+    ("RLHF", "rlhf"),
+    ("PPO", "ppo"),
+    ("HuggingFace", "huggingface"),
+    ("BM25", "bm25"),
+    ("retrieval", "retrieval"),
+    ("reranking", "reranking"),
+    ("reranker", "reranker"),
+    ("transformers", "transformers"),
+    ("PyTorch", "pytorch"),
+    ("LLMs", "llm"),
+    ("NLP", "nlp"),
+]
+_PROFILE_DERIVATION_FIELDS = (
+    "must_have_preferences",
+    "preferred_roles",
+    "candidate_summary",
+    "experience_highlights",
+)
+_TECHNICAL_EXPERIENCE_KEYS = (
+    "python_years",
+    "ml_years",
+    "llm_nlp_rag_years",
+    "pytorch_years",
+    "huggingface_years",
+)
 
 
-def _load_candidate_profile() -> str:
+def _clamp_points(raw_value: str | None, default: int) -> int:
+    try:
+        value = int(str(raw_value).strip())
+    except (TypeError, ValueError, AttributeError):
+        value = default
+    return max(0, min(_POINT_MAX, value))
+
+
+def _split_keywords(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    parts = re.split(r"[\n,;|]+", raw_value)
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for part in parts:
+        item = re.sub(r"^\s*[-*]\s*", "", part).strip().strip('"')
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    return cleaned
+
+
+def _profile_blob(profile_kv: dict[str, str], fields: tuple[str, ...]) -> str:
+    return "\n".join(profile_kv.get(field, "") for field in fields if profile_kv.get(field, "")).lower()
+
+
+def _derive_niche_keywords(profile_kv: dict[str, str]) -> list[str]:
+    derived: list[str] = []
+    blob = _profile_blob(profile_kv, _PROFILE_DERIVATION_FIELDS)
+    for rendered, hint in _NICHE_HINT_KEYWORDS:
+        if hint in blob:
+            derived.append(rendered)
+
+    for key in _TECHNICAL_EXPERIENCE_KEYS:
+        raw = profile_kv.get(key, "")
+        if not raw:
+            continue
+        try:
+            years = float(re.sub(r"[^\d.]", "", raw))
+        except ValueError:
+            years = 0.0
+        if years <= 0:
+            continue
+        if key == "huggingface_years":
+            derived.append("HuggingFace")
+        elif key == "llm_nlp_rag_years":
+            derived.extend(["LLMs", "NLP", "RAG"])
+        elif key == "pytorch_years":
+            derived.append("PyTorch")
+        elif key == "ml_years":
+            derived.append("Machine Learning")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in derived:
+        norm = item.lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        deduped.append(item)
+    return deduped
+
+
+def _derive_trending_keywords(profile_kv: dict[str, str]) -> list[str]:
+    blob = _profile_blob(profile_kv, _PROFILE_DERIVATION_FIELDS)
+    choices = []
+    keyword_map = {
+        "AI agents": ("ai agents", "agent"),
+        "agentic": ("agentic",),
+        "LangChain": ("langchain",),
+    }
+    for rendered, hints in keyword_map.items():
+        if any(hint in blob for hint in hints):
+            choices.append(rendered)
+    return choices
+
+
+def _is_junior_profile(profile_kv: dict[str, str], profile_text: str) -> bool:
+    combined = " ".join(
+        filter(
+            None,
+            [
+                profile_kv.get("total_experience", ""),
+                profile_kv.get("graduation_year", ""),
+                profile_kv.get("candidate_summary", ""),
+                profile_kv.get("must_have_preferences", ""),
+                profile_text,
+            ],
+        )
+    ).lower()
+    junior_markers = [
+        "fresher",
+        "junior",
+        "entry-level",
+        "entry level",
+        "graduating",
+        "graduation",
+        "no full-time",
+        "internship experience",
+    ]
+    return any(marker in combined for marker in junior_markers)
+
+
+def _load_scoring_policy(profile_kv: dict[str, str], profile_text: str) -> dict[str, object]:
+    explicit_niche = _split_keywords(profile_kv.get("scoring_boost_niche_keywords"))
+    explicit_trending = _split_keywords(profile_kv.get("scoring_boost_trending_keywords"))
+    explicit_junior = _split_keywords(profile_kv.get("scoring_boost_junior_signals"))
+
+    junior_profile = _is_junior_profile(profile_kv, profile_text)
+
+    niche_keywords = explicit_niche or _derive_niche_keywords(profile_kv)
+    trending_keywords = explicit_trending or _derive_trending_keywords(profile_kv)
+    junior_signals = explicit_junior or (_DEFAULT_JUNIOR_SIGNALS if junior_profile else [])
+
+    return {
+        "niche_keywords": niche_keywords,
+        "trending_keywords": trending_keywords,
+        "junior_signals": junior_signals,
+        "niche_points": _clamp_points(profile_kv.get("scoring_boost_niche_points"), _POINT_DEFAULTS["niche"]),
+        "trending_points": _clamp_points(profile_kv.get("scoring_boost_trending_points"), _POINT_DEFAULTS["trending"]),
+        "junior_points": _clamp_points(profile_kv.get("scoring_boost_junior_points"), _POINT_DEFAULTS["junior"]),
+        "enable_junior_boosts": bool(junior_signals),
+    }
+
+
+def _render_mandatory_boosts(policy: dict[str, object]) -> str:
+    lines: list[str] = []
+    if policy["niche_keywords"]:
+        keywords = ", ".join(policy["niche_keywords"])
+        lines.append(
+            f"1. Niche Skill Match: +{policy['niche_points']} points if the JD explicitly mentions or strongly aligns with profile-differentiating skills such as {keywords}."
+        )
+    if policy["trending_keywords"]:
+        keywords = ", ".join(policy["trending_keywords"])
+        lines.append(
+            f"{len(lines) + 1}. Agentic/Trending Match: +{policy['trending_points']} points if the JD mentions or strongly aligns with profile-relevant trending themes such as {keywords}."
+        )
+    if policy["junior_signals"]:
+        signals = ", ".join(f'"{signal}"' for signal in policy["junior_signals"])
+        lines.append(
+            f"{len(lines) + 1}. Junior-Friendly Language: +{policy['junior_points']} points if the JD includes signals such as {signals}."
+        )
+    if not lines:
+        return ""
+    return "MANDATORY BOOSTS (apply these to raise the score after penalties):\n" + "\n".join(lines) + "\n\n"
+
+
+def _load_candidate_profile_text() -> str:
     if not PROFILE_FILE.exists():
         raise FileNotFoundError("APPLY_PROFILE.md not found. Fill in your profile before scoring jobs.")
     return load_profile_text(PROFILE_FILE)
+
+
+def _load_candidate_profile_kv() -> dict[str, str]:
+    if not PROFILE_FILE.exists():
+        raise FileNotFoundError("APPLY_PROFILE.md not found. Fill in your profile before scoring jobs.")
+    return load_key_value_profile(PROFILE_FILE)
 
 
 def _extract_jd_fields(desc: str) -> str:
@@ -113,13 +313,12 @@ def _format_batch(batch: list[dict]) -> str:
     return json.dumps(payload, indent=1)
 
 
-def _build_prompt(profile_text: str, batch: list[dict]) -> str:
+def _build_prompt(profile_text: str, policy: dict[str, object], batch: list[dict]) -> str:
     jobs_json = _format_batch(batch)
-    return (
-        f"{SCORING_RULES}\n\n"
-        f"CANDIDATE PROFILE:\n{profile_text}\n\n"
-        f"Jobs to score:\n{jobs_json}\n"
-    )
+    scoring_rules = PROMPT_TEMPLATE.substitute(
+        mandatory_boosts=_render_mandatory_boosts(policy),
+    ).strip()
+    return f"{scoring_rules}\n\nCANDIDATE PROFILE:\n{profile_text}\n\nJobs to score:\n{jobs_json}\n"
 
 
 def _validate(items: list, expected_ids: set[str]) -> list[dict]:
@@ -203,7 +402,9 @@ def run(rescore_model: str | None = None) -> pd.DataFrame:
     if not os.path.exists(FILTERED_CSV):
         raise FileNotFoundError(FILTERED_CSV)
 
-    profile_text = _load_candidate_profile()
+    profile_text = _load_candidate_profile_text()
+    profile_kv = _load_candidate_profile_kv()
+    scoring_policy = _load_scoring_policy(profile_kv, profile_text)
     df = pd.read_csv(FILTERED_CSV)
     log.info("Loaded %d jobs from %s", len(df), FILTERED_CSV)
 
@@ -238,7 +439,7 @@ def run(rescore_model: str | None = None) -> pd.DataFrame:
         log.info("Batch %d/%d - %s", batch_num, total_batches, companies)
 
         expected_ids = {str(job["id"]) for job in batch}
-        prompt = _build_prompt(profile_text, batch)
+        prompt = _build_prompt(profile_text, scoring_policy, batch)
 
         try:
             raw = chat(prompt, max_tokens=8192)

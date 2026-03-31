@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sqlite3
 import time
@@ -12,7 +13,8 @@ from pathlib import Path
 
 from config import AUTO_APPLY_DELAY, DB_PATH, MAX_APPLIES_PER_RUN
 from indeed_apply import IndeedApplyBot
-from linkedin_apply import ApplyResult, LinkedInApplyBot
+from core.models import ApplyResult
+from linkedin_apply import LinkedInApplyBot
 from greenhouse_apply import GreenhouseApplyBot
 from lever_apply import LeverApplyBot
 from ats_router import ATSType, Difficulty, classify_job
@@ -70,17 +72,17 @@ def get_approved_jobs(limit: int = 100) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def set_status(job_id: str, status: str, notes: str = "") -> None:
+def set_status(job_id: str, status: str, notes: str = "", qa_log: str = "") -> None:
     conn = sqlite3.connect(DB_PATH)
     if status == "applied":
         conn.execute(
-            "UPDATE jobs SET status='applied', applied_at=? WHERE id=?",
-            (datetime.now().isoformat(), job_id),
+            "UPDATE jobs SET status='applied', applied_at=?, qa_log=? WHERE id=?",
+            (datetime.now().isoformat(), qa_log, job_id),
         )
     else:
         conn.execute(
-            "UPDATE jobs SET status=?, gaps=? WHERE id=?",
-            (status, notes, job_id),
+            "UPDATE jobs SET status=?, gaps=?, qa_log=? WHERE id=?",
+            (status, notes, qa_log, job_id),
         )
     conn.commit()
     conn.close()
@@ -145,13 +147,14 @@ def _log(job: dict, result: ApplyResult) -> None:
 
 def _commit(job: dict, result: ApplyResult) -> None:
     """Persist the ApplyResult back to the DB."""
+    qa_log = json.dumps(result.qa_log, ensure_ascii=False) if result.qa_log else ""
     if result.status in ("applied", "already_applied"):
-        set_status(job["id"], "applied")
+        set_status(job["id"], "applied", qa_log=qa_log)
     elif result.status == "manual_review":
         notes = " | ".join(result.manual_questions[:5])
-        set_status(job["id"], "manual_review", notes)
+        set_status(job["id"], "manual_review", notes, qa_log)
     else:
-        set_status(job["id"], "error", result.error_message)
+        set_status(job["id"], "error", result.error_message, qa_log)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

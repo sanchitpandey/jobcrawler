@@ -5,30 +5,20 @@ from __future__ import annotations
 import random
 import re
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin
 
 from playwright.sync_api import BrowserContext, Locator, Page, TimeoutError as PWTimeoutError, sync_playwright
 
 from config import LINKEDIN_EMAIL, LINKEDIN_PASSWORD, RESUME_PATH
-from form_filler import answer_question
+from core.models import ApplyResult
+from form_filler import answer_question, clear_qa_log, get_qa_log, start_qa_log
 from navigator import find_button, find_form_fields, find_modal
 from checkpoint import save_checkpoint, load_checkpoint, clear_checkpoint
 
 SESSION_FILE = Path("output/linkedin_session.json")
 RESUME_PATH_OBJ = Path(RESUME_PATH)
 DEBUG_DIR = Path("output/debug")
-
-
-@dataclass
-class ApplyResult:
-    status: str
-    job_url: str = ""
-    company: str = ""
-    title: str = ""
-    manual_questions: list[str] = field(default_factory=list)
-    error_message: str = ""
 
 
 def _human_delay(lo: float = 0.8, hi: float = 2.5) -> None:
@@ -225,6 +215,7 @@ class LinkedInApplyBot:
 
     def apply(self, job_url: str, company: str = "", title: str = "") -> ApplyResult:
         page = self._page
+        start_qa_log()
         result = ApplyResult(status="error", job_url=job_url, company=company, title=title)
 
         try:
@@ -258,7 +249,10 @@ class LinkedInApplyBot:
             easy_apply_btn = self._find_easy_apply_button(page)
             if easy_apply_btn is None:
                 failure_message = self._classify_apply_button_failure(page, company, title)
-                if "external apply" in failure_message.lower():
+                if failure_message == "closed_posting":
+                    result.status = "error"
+                    result.error_message = failure_message
+                elif "external apply" in failure_message.lower():
                     result.status = "manual_review"
                     result.manual_questions.append(failure_message)
                 else:
@@ -311,6 +305,9 @@ class LinkedInApplyBot:
             result.status = "error"
             result.error_message = str(exc)
             self._save_debug_snapshot(page, company, title, prefix="linkedin_exception")
+        finally:
+            result.qa_log = get_qa_log()
+            clear_qa_log()
 
         return result
 
@@ -496,6 +493,9 @@ class LinkedInApplyBot:
 
     def _classify_apply_button_failure(self, page: Page, company: str, title: str) -> str:
         self._save_debug_snapshot(page, company, title)
+
+        if page.locator("text=No longer accepting applications").count() > 0:
+            return "closed_posting"
 
         # Check for a URL-based Similar Jobs / search redirect first.
         # We avoid h2/h3 text or .jobs-similar-jobs CSS checks because those also match the

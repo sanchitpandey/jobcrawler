@@ -25,12 +25,13 @@ def init_db() -> None:
                 scraped_at TEXT,
                 applied_at TEXT,
                 ats_type TEXT,
-                difficulty TEXT
+                difficulty TEXT,
+                qa_log TEXT
             )
             """
         )
         # Idempotent migrations for databases created before these columns existed
-        for column, definition in [("ats_type", "TEXT"), ("difficulty", "TEXT")]:
+        for column, definition in [("ats_type", "TEXT"), ("difficulty", "TEXT"), ("qa_log", "TEXT")]:
             try:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
             except Exception:
@@ -47,16 +48,17 @@ def is_seen(job_id: str) -> bool:
 def upsert_job(job: dict) -> None:
     job.setdefault("ats_type", None)
     job.setdefault("difficulty", None)
+    job.setdefault("qa_log", None)
     with db_connection() as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO jobs
             (id, company, title, location, url, fit_score, comp_est,
              verdict, gaps, status, cover_letter, scraped_at,
-             ats_type, difficulty)
+             ats_type, difficulty, qa_log)
             VALUES (:id, :company, :title, :location, :url, :fit_score,
                     :comp_est, :verdict, :gaps, :status, :cover_letter, :scraped_at,
-                    :ats_type, :difficulty)
+                    :ats_type, :difficulty, :qa_log)
             """,
             job,
         )
@@ -69,7 +71,8 @@ def upsert_job(job: dict) -> None:
                 gaps = :gaps,
                 scraped_at = :scraped_at,
                 ats_type = :ats_type,
-                difficulty = :difficulty
+                difficulty = :difficulty,
+                qa_log = :qa_log
             WHERE id = :id AND status = 'new'
             """,
             job,

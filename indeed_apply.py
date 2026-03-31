@@ -21,9 +21,9 @@ from playwright.sync_api import (
     TimeoutError as PWTimeoutError
 )
 
-from form_filler import answer_question
+from form_filler import answer_question, clear_qa_log, get_qa_log, start_qa_log
 from config import INDEED_EMAIL, INDEED_PASSWORD, RESUME_PATH
-from linkedin_apply import ApplyResult   # reuse same dataclass
+from core.models import ApplyResult
 from navigator import find_button, find_form_fields
 
 SESSION_FILE  = "output/indeed_session.json"
@@ -100,6 +100,7 @@ class IndeedApplyBot:
         title:     str = "",
     ) -> ApplyResult:
         page   = self._page
+        start_qa_log()
         result = ApplyResult(status="error", job_url=job_url, company=company, title=title)
 
         try:
@@ -143,6 +144,9 @@ class IndeedApplyBot:
         except Exception as e:
             result.status = "error"
             result.error_message = str(e)
+        finally:
+            result.qa_log = get_qa_log()
+            clear_qa_log()
 
         return result
 

@@ -29,3 +29,4 @@ class ApplyResult:
     title: str = ""
     manual_questions: list[str] = field(default_factory=list)
     error_message: str = ""
+    qa_log: dict[str, str] = field(default_factory=dict)
