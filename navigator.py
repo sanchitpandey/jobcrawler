@@ -414,6 +414,29 @@ def find_file_upload(page: Page) -> Locator | None:
 # Internal: label resolution (shared by find_form_fields)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _dedup_label(text: str) -> str:
+    """
+    Remove exact-repeat label duplication introduced by LinkedIn's custom
+    form components (e.g. "What is your notice period?What is your notice period?").
+    If the string is X+X (or X+whitespace+X), return X.
+    """
+    text = text.strip()
+    n = len(text)
+    if n < 4:
+        return text
+    # Exact even split
+    half = n // 2
+    if n % 2 == 0 and text[:half] == text[half:]:
+        return text[:half].strip()
+    # Try trimmed halves (allows a space or newline between repetitions)
+    for sep in ("\n", "\r\n", " "):
+        if sep in text:
+            parts = text.split(sep, 1)
+            if len(parts) == 2 and parts[0].strip() == parts[1].strip():
+                return parts[0].strip()
+    return text
+
+
 def _label_for_element(page: Page, el: Locator) -> str:
     """
     Return the best human-readable label for a form element.
@@ -428,7 +451,7 @@ def _label_for_element(page: Page, el: Locator) -> str:
     try:
         aria_label = el.get_attribute("aria-label")
         if aria_label and aria_label.strip():
-            return aria_label.strip()
+            return _dedup_label(aria_label.strip())
 
         element_id = el.get_attribute("id")
         if element_id:
@@ -436,17 +459,17 @@ def _label_for_element(page: Page, el: Locator) -> str:
             if label_el.count() > 0:
                 text = (label_el.text_content() or "").strip()
                 if text:
-                    return text
+                    return _dedup_label(text)
 
         placeholder = el.get_attribute("placeholder")
         if placeholder and placeholder.strip():
-            return placeholder.strip()
+            return _dedup_label(placeholder.strip())
 
         ancestor_label = el.locator("xpath=ancestor::label").first
         if ancestor_label.count() > 0:
             text = (ancestor_label.text_content() or "").strip()
             if text:
-                return text
+                return _dedup_label(text)
     except Exception:
         pass
     return ""

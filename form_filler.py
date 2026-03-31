@@ -5,23 +5,21 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from groq import Groq
 
 from config import TARGET_COMP_LPA
 from core.profile import load_key_value_profile, load_profile_text
 from logger import get_logger
+import providers
 
 load_dotenv()
 log = get_logger(__name__)
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
 PROFILE_FILE = Path("APPLY_PROFILE.md")
 PROFILE_CONTEXT_FILES = ["APPLY_PROFILE.md"]
 
@@ -155,7 +153,6 @@ MANUAL_REVIEW_PATTERNS = re.compile(
     re.I,
 )
 
-_client: Optional[Groq] = None
 _profile_text: Optional[str] = None
 
 
@@ -168,21 +165,6 @@ class FilledAnswer:
     confidence: float = 1.0
 
 
-def _get_client() -> Groq:
-    global _client
-    if _client is None:
-        api_key = os.environ.get("GROQ_API_KEY")
-        if not api_key:
-            raise EnvironmentError(
-                "GROQ_API_KEY not set. Get a free key at console.groq.com\n"
-                "Windows: $env:GROQ_API_KEY = 'gsk_...'\n"
-                "Linux/Mac: export GROQ_API_KEY=gsk_...'"
-            )
-        _client = Groq(api_key=api_key)
-        log.debug("Groq client ready")
-    return _client
-
-
 def _get_profile() -> str:
     global _profile_text
     if _profile_text is None:
@@ -191,13 +173,16 @@ def _get_profile() -> str:
 
 
 def _match_option(value: str, options: list[str]) -> str | None:
-    candidate = value.lower()
+    candidate = value.lower().strip()
+    # Exact match
     for option in options:
         if option.lower() == candidate:
             return option
+    # Substring match
     for option in options:
         if candidate in option.lower() or option.lower() in candidate:
             return option
+    # Boolean shorthands
     if candidate in {"yes", "true", "1"}:
         for option in options:
             if option.lower() in {"yes", "true"}:
@@ -205,6 +190,18 @@ def _match_option(value: str, options: list[str]) -> str | None:
     if candidate in {"no", "false", "0"}:
         for option in options:
             if option.lower() in {"no", "false"}:
+                return option
+    # Semantic: "available immediately" / "immediate" / "0 days" / "no notice" maps to
+    # the shortest notice-period option (e.g. "Less than 15 Days", "Immediate", "0-15 days")
+    if any(kw in candidate for kw in ("immediate", "0 day", "no notice", "available now")):
+        # Find the option that represents the shortest / no wait period
+        for option in options:
+            opt_l = option.lower()
+            if any(k in opt_l for k in ("immediate", "0", "less than 15", "< 15", "within 15")):
+                return option
+        # Fall back to the first non-placeholder option
+        for option in options:
+            if option.lower() not in ("select an option", "select", "please select", ""):
                 return option
     return None
 
@@ -215,6 +212,7 @@ def answer_question(
     options: list[str] | None = None,
     company: str = "",
     job_title: str = "",
+    validation_error: str = "",
 ) -> FilledAnswer:
     question = question_text.strip()
     log.debug("Answering question: %r", question[:80])
@@ -232,19 +230,23 @@ def answer_question(
             else:
                 return FilledAnswer(raw_value, "pattern", raw_question=question)
 
-    cached = _cache_get(_cache_key(question))
-    if cached is not None:
-        return cached
+    # When a validation error is present, bypass the cache so the LLM sees the
+    # error context and can correct its previous answer.
+    if not validation_error:
+        cached = _cache_get(_cache_key(question))
+        if cached is not None:
+            return cached
 
-    return _ask_groq(question, field_type, options, company, job_title)
+    return _ask_llm(question, field_type, options, company, job_title, validation_error)
 
 
-def _ask_groq(
+def _ask_llm(
     question: str,
     field_type: str,
     options: list[str] | None,
     company: str,
     job_title: str,
+    validation_error: str = "",
 ) -> FilledAnswer:
     profile = _get_profile()
     options_str = (
@@ -255,46 +257,51 @@ def _ask_groq(
         " answer with ONLY a number (e.g., '1' or '2')."
         " Never include text like 'years' or parenthetical explanations."
     ) if _YEARS_EXP_LABEL_PATTERN.search(question) else ""
-    system = (
+    # Detect whether the validation error is a numeric constraint so we can
+    # issue a hard "numbers only" instruction and shrink the token budget.
+    _numeric_error = bool(
+        validation_error and re.search(
+            r"decimal|number|numerical|\d+\s*(or\s*)?larger|greater than", validation_error, re.I
+        )
+    )
+    if validation_error:
+        if _numeric_error:
+            error_hint = (
+                f"\nIMPORTANT — The previous answer was rejected: \"{validation_error}\". "
+                "The field requires a NUMBER. "
+                "Output ONLY a single number (digits and optional decimal point, nothing else). "
+                "Example valid answers: 0.5  1  2  3.5"
+            )
+        else:
+            error_hint = (
+                f"\nIMPORTANT — The previous answer was rejected: \"{validation_error}\". "
+                "Your new answer MUST satisfy this constraint."
+            )
+    else:
+        error_hint = ""
+
+    prompt = (
         "You fill job application forms for a candidate. "
         "Answer only the question asked. "
         "For dropdowns and radio buttons, output exactly one listed option. "
         "For text answers, keep the answer concise. "
         "If a truthful answer requires a personal anecdote or unknown detail, output MANUAL_REVIEW."
         + numeric_hint
-    )
-    user = (
-        f"Candidate profile:\n{profile}\n\n"
+        + error_hint
+        + f"\n\nCandidate profile:\n{profile}\n\n"
         f"Applying to: {company} - {job_title}\n\n"
         f'Question: "{question}"\n'
         f"Field type: {field_type}{options_str}\n\nAnswer:"
     )
 
-    def _call():
-        return _get_client().chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            max_tokens=200,
-            temperature=0.1,
-        )
+    # Numeric fields need very short responses — cut token budget accordingly.
+    max_tok = 20 if (_numeric_error or field_type == "number") else 200
 
     try:
-        response = _call()
-        answer = response.choices[0].message.content.strip()
+        answer = providers.chat(prompt, max_tokens=max_tok, temperature=0.1)
     except Exception as exc:
-        if "429" in str(exc) or "rate_limit" in str(exc).lower():
-            log.warning("Groq rate limit hit during form fill. Waiting 62 seconds.")
-            time.sleep(62)
-            try:
-                response = _call()
-                answer = response.choices[0].message.content.strip()
-            except Exception:
-                return FilledAnswer("", "manual_review", True, question)
-        else:
-            return FilledAnswer("", "manual_review", True, question)
+        log.warning("LLM call failed during form fill: %s", str(exc)[:120])
+        return FilledAnswer("", "manual_review", True, question)
 
     if not answer or answer == "MANUAL_REVIEW":
         return FilledAnswer("", "manual_review", True, question)
@@ -306,7 +313,8 @@ def _ask_groq(
         else:
             return FilledAnswer("", "manual_review", True, question, 0.0)
 
-    result = FilledAnswer(answer, "groq", raw_question=question, confidence=0.85)
+    provider_name = providers.get_session().provider.name.lower()
+    result = FilledAnswer(answer, provider_name, raw_question=question, confidence=0.85)
     _cache_put(_cache_key(question), result)
     return result
 

@@ -37,6 +37,7 @@ def _scrape_term(term: str, location: str, sites: list[str]) -> pd.DataFrame | N
             results_wanted=RESULTS_PER_QUERY,
             hours_old=HOURS_OLD,
             job_type="fulltime",
+            easy_apply=True,
             linkedin_fetch_description=True,
         )
         print(f"    -> {len(jobs)} results")

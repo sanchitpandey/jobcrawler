@@ -40,6 +40,36 @@ def _sanitize_slug(value: str) -> str:
     return cleaned.strip("_") or "job"
 
 
+def _enforce_maxlength(locator: Locator, text: str) -> str:
+    """Truncate *text* to the field's maxlength attribute (at a word boundary if possible)."""
+    try:
+        ml = locator.get_attribute("maxlength")
+        if ml and ml.isdigit():
+            limit = int(ml)
+            if len(text) > limit:
+                truncated = text[:limit]
+                # Back up to last word boundary to avoid cutting mid-word
+                boundary = truncated.rsplit(" ", 1)[0].rstrip(".,;: ")
+                return boundary if boundary else truncated[:limit]
+    except Exception:
+        pass
+    return text
+
+
+def _parse_char_limit_from_error(error_text: str) -> int | None:
+    """Extract character limit from LinkedIn's validation message, e.g. 'Please enter 300 characters or fewer'."""
+    m = re.search(r"(\d+)\s+characters?\s+or\s+fewer", error_text, re.I)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"maximum\s+(\d+)\s+characters?", error_text, re.I)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"must\s+be\s+(\d+)\s+characters?\s+or\s+(less|fewer)", error_text, re.I)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 def _type_into(locator: Locator, text: str) -> None:
     locator.click()
     locator.fill(text)
@@ -607,37 +637,85 @@ class LinkedInApplyBot:
             label = field.label
             if not label:
                 continue
-            
+
             print(f"DEBUG: Found field '{label}' (type: {field.field_type})")
 
             if field.field_type in ("text", "email", "tel", "textarea"):
+                # Detect decimal-number constraint first (before the skip-if-filled check)
+                # so we can clear non-numeric drafts in such fields.
+                decimal_min: float | None = None
                 try:
-                    if field.locator.input_value():
-                        print(f"DEBUG: Field '{label}' already has value: {field.locator.input_value()}")
-                        continue
+                    placeholder = (field.locator.get_attribute("placeholder") or "").strip()
+                    if re.search(r"decimal|number\s+(larger|greater|more)\s+than|enter a number", placeholder, re.I):
+                        m = re.search(r"(larger|greater|more)\s+than\s+([\d.]+)", placeholder, re.I)
+                        decimal_min = float(m.group(2)) if m else 0.0
+                        print(f"DEBUG: Field '{label}' detected as decimal-number (min={decimal_min}), placeholder={placeholder!r}")
                 except Exception:
                     pass
-                filled = answer_question(label, "text", company=company, job_title=title)
-                print(f"DEBUG: Answer for '{label}': {filled}")
-                if filled.is_manual_review:
-                    manual_review_questions.append(label)
-                elif filled.value:
-                    # Strip non-digits for text fields that actually expect a number
-                    # (LinkedIn uses type="text" for some numeric fields with validation)
-                    answer_text = filled.value
-                    if re.search(r"\byrs?\b.*exp|\byears?\b.*exp|years? of exp", label, re.I):
-                        digits_only = re.sub(r"[^\d]", "", answer_text)
-                        if digits_only:
-                            answer_text = digits_only
-                    _type_into(field.locator, answer_text)
-                    filled_values[label] = answer_text
-                    _human_delay(0.3, 0.8)
+
+                # Skip if already filled — UNLESS:
+                #   (a) the field is marked aria-invalid, OR
+                #   (b) this is a decimal field and the existing value is non-numeric
+                try:
+                    existing = field.locator.input_value()
+                    if existing:
+                        is_invalid = field.locator.get_attribute("aria-invalid") == "true"
+                        decimal_value_invalid = (
+                            decimal_min is not None
+                            and not re.fullmatch(r"[\d.]+", existing.strip())
+                        )
+                        if not is_invalid and not decimal_value_invalid:
+                            print(f"DEBUG: Field '{label}' already has value: {existing!r}")
+                            continue
+                        reason = "aria-invalid" if is_invalid else "non-numeric value in decimal field"
+                        print(f"DEBUG: Field '{label}' clearing ({reason}): {existing[:60]!r}")
+                        field.locator.fill("")
+                        _human_delay(0.1, 0.3)
+                except Exception:
+                    pass
+
+                if decimal_min is not None:
+                    # Field expects a decimal > decimal_min
+                    filled = answer_question(label, "number", company=company, job_title=title)
+                    print(f"DEBUG: Decimal answer for '{label}': {filled}")
+                    if filled.is_manual_review:
+                        manual_review_questions.append(label)
+                    else:
+                        _m = re.search(r"\d+\.?\d*", filled.value or "")
+                        try:
+                            num_val = float(_m.group()) if _m else 0.0
+                        except ValueError:
+                            num_val = 0.0
+                        if num_val <= decimal_min:
+                            num_val = decimal_min + 1.0
+                        answer_text = f"{num_val:.1f}".rstrip("0").rstrip(".")
+                        field.locator.fill(answer_text)
+                        filled_values[label] = answer_text
+                        _human_delay(0.3, 0.6)
+                else:
+                    filled = answer_question(label, "text", company=company, job_title=title)
+                    print(f"DEBUG: Answer for '{label}': {filled}")
+                    if filled.is_manual_review:
+                        manual_review_questions.append(label)
+                    elif filled.value:
+                        answer_text = filled.value
+                        if re.search(r"\byrs?\b.*exp|\byears?\b.*exp|years? of exp", label, re.I):
+                            digits_only = re.sub(r"[^\d]", "", answer_text)
+                            if digits_only:
+                                answer_text = digits_only
+                        answer_text = _enforce_maxlength(field.locator, answer_text)
+                        _type_into(field.locator, answer_text)
+                        filled_values[label] = answer_text
+                        _human_delay(0.3, 0.8)
 
             elif field.field_type == "number":
                 try:
                     if field.locator.input_value():
-                        print(f"DEBUG: Field '{label}' already has value: {field.locator.input_value()}")
-                        continue
+                        is_invalid = field.locator.get_attribute("aria-invalid") == "true"
+                        if not is_invalid:
+                            print(f"DEBUG: Field '{label}' already has value: {field.locator.input_value()!r}")
+                            continue
+                        field.locator.fill("")
                 except Exception:
                     pass
                 filled = answer_question(label, "text", company=company, job_title=title)
@@ -687,13 +765,20 @@ class LinkedInApplyBot:
         return manual_review_questions, filled_values, has_error
 
     def _fix_validation_errors(self, scope, company: str, title: str) -> bool:
-        """Find aria-invalid fields, clear them, and re-answer. Returns True if at least one field was touched."""
+        """
+        Find aria-invalid fields, clear them, and re-fill correctly.
+
+        Handles two distinct cases:
+        - Character-limit errors: truncate the current value to the limit reported
+          in the adjacent error message (no LLM call needed).
+        - Numeric-format errors: re-ask the LLM as a number type and fill digits only.
+        """
         touched = False
         try:
             invalid_fields = scope.locator("[aria-invalid='true']").all()
             for field_loc in invalid_fields:
                 try:
-                    # Derive label from aria-label, placeholder, or associated <label>
+                    # Derive label
                     label = (field_loc.get_attribute("aria-label") or "").strip()
                     if not label:
                         label = (field_loc.get_attribute("placeholder") or "").strip()
@@ -706,39 +791,276 @@ class LinkedInApplyBot:
                     if not label:
                         continue
 
+                    # Find the adjacent error message for this field
+                    char_limit: int | None = None
+                    field_id = field_loc.get_attribute("id") or ""
+                    error_selectors = [
+                        f"[id*='{field_id}'][class*='error']" if field_id else None,
+                        ".artdeco-inline-feedback--error",
+                    ]
+                    for err_sel in error_selectors:
+                        if not err_sel:
+                            continue
+                        try:
+                            err_els = scope.locator(err_sel).all()
+                            for err_el in err_els:
+                                err_txt = (err_el.inner_text(timeout=400) or "").strip()
+                                if err_txt:
+                                    print(f"DEBUG: fix_validation error text: {err_txt!r}")
+                                    limit = _parse_char_limit_from_error(err_txt)
+                                    if limit:
+                                        char_limit = limit
+                                        break
+                        except Exception:
+                            pass
+                        if char_limit:
+                            break
+
+                    # Case 1: character-limit error — truncate without re-asking
+                    if char_limit is not None:
+                        try:
+                            current = field_loc.input_value() or ""
+                        except Exception:
+                            current = ""
+                        if len(current) > char_limit:
+                            truncated = current[:char_limit].rsplit(" ", 1)[0].rstrip(".,;: ")
+                            if not truncated:
+                                truncated = current[:char_limit]
+                        else:
+                            # Value is within limit — error might be stale; touch anyway
+                            truncated = current
+                        print(f"DEBUG: Char-limit fix: trimming to {char_limit} chars (was {len(current)})")
+                        field_loc.click()
+                        field_loc.fill(truncated)
+                        _human_delay(0.2, 0.4)
+                        touched = True
+                        continue
+
+                    # Case 2a: decimal-number-larger-than-X constraint
+                    decimal_min_req: float | None = None
+                    for err_sel2 in error_selectors:
+                        if not err_sel2:
+                            continue
+                        try:
+                            for err_el2 in scope.locator(err_sel2).all():
+                                et = (err_el2.inner_text(timeout=400) or "").strip()
+                                m2 = re.search(
+                                    r"decimal number larger than\s+([\d.]+)|"
+                                    r"number\s+(larger|greater|more)\s+than\s+([\d.]+)|"
+                                    r"must be (greater|larger) than\s+([\d.]+)",
+                                    et, re.I,
+                                )
+                                if m2:
+                                    raw = next(g for g in m2.groups() if g and re.match(r"[\d.]+", g))
+                                    decimal_min_req = float(raw)
+                                    break
+                        except Exception:
+                            pass
+                        if decimal_min_req is not None:
+                            break
+
+                    # Also check the placeholder for the decimal hint
+                    if decimal_min_req is None:
+                        try:
+                            ph = (field_loc.get_attribute("placeholder") or "").lower()
+                            m_ph = re.search(r"(larger|greater|more)\s+than\s+([\d.]+)", ph, re.I)
+                            if m_ph:
+                                decimal_min_req = float(m_ph.group(2))
+                        except Exception:
+                            pass
+
+                    if decimal_min_req is not None:
+                        # Collect all visible error texts for this field to pass as context
+                        _all_errs = []
+                        for _es in error_selectors:
+                            if not _es:
+                                continue
+                            try:
+                                for _ee in scope.locator(_es).all():
+                                    _et = (_ee.inner_text(timeout=400) or "").strip()
+                                    if _et:
+                                        _all_errs.append(_et)
+                            except Exception:
+                                pass
+                        _err_ctx = "; ".join(dict.fromkeys(_all_errs))
+                        print(f"DEBUG: decimal-min fix for '{label}', min={decimal_min_req}, error={_err_ctx!r}")
+                        filled = answer_question(label, "number", company=company, job_title=title, validation_error=_err_ctx)
+                        _m2 = re.search(r"\d+\.?\d*", filled.value or "")
+                        try:
+                            num_val = float(_m2.group()) if _m2 else 0.0
+                        except ValueError:
+                            num_val = 0.0
+                        if num_val <= decimal_min_req:
+                            num_val = decimal_min_req + 1.0
+                        answer_str = f"{num_val:.1f}".rstrip("0").rstrip(".")
+                        field_loc.click()
+                        field_loc.fill(answer_str)
+                        _human_delay(0.2, 0.4)
+                        touched = True
+                        continue
+
+                    # Case 2b: likely a numeric/format error — re-ask as number
+                    # Collect error text for LLM context
+                    _err_ctx_b = ""
+                    try:
+                        for _es in error_selectors:
+                            if not _es:
+                                continue
+                            for _ee in scope.locator(_es).all():
+                                _et = (_ee.inner_text(timeout=400) or "").strip()
+                                if _et:
+                                    _err_ctx_b = _et
+                                    break
+                            if _err_ctx_b:
+                                break
+                    except Exception:
+                        pass
                     field_loc.click()
                     field_loc.fill("")
                     _human_delay(0.2, 0.4)
 
-                    filled = answer_question(label, "number", company=company, job_title=title)
+                    filled = answer_question(label, "number", company=company, job_title=title, validation_error=_err_ctx_b)
                     if filled.value:
-                        digits = re.sub(r"[^\d.]", "", filled.value)
-                        field_loc.fill(digits if digits else filled.value)
+                        _m3 = re.search(r"\d+\.?\d*", filled.value)
+                        field_loc.fill(_m3.group() if _m3 else filled.value)
                         _human_delay(0.2, 0.4)
                         touched = True
                 except Exception:
                     continue
         except Exception:
             pass
+
+        # Fallback: handle decimal/char-limit errors on fields that are NOT marked
+        # aria-invalid (LinkedIn often shows .artdeco-inline-feedback--error without
+        # setting aria-invalid on the input).  Find the field via aria-describedby.
+        try:
+            for err_el in scope.locator(".artdeco-inline-feedback--error").all():
+                try:
+                    err_txt = (err_el.inner_text(timeout=400) or "").strip()
+                    if not err_txt:
+                        continue
+                    print(f"DEBUG: fix_validation fallback error: {err_txt!r}")
+
+                    # Try to find the associated input via aria-describedby first,
+                    # then fall back to walking up the DOM tree.
+                    err_id = (err_el.get_attribute("id") or "").strip()
+                    inp_loc = None
+                    if err_id:
+                        candidate = scope.locator(f"[aria-describedby*='{err_id}']").first
+                        if candidate.count() > 0:
+                            inp_loc = candidate
+                    if inp_loc is None:
+                        # Walk up the DOM (up to 5 levels) to find a parent that
+                        # also contains a text input.
+                        for _lvl in range(1, 6):
+                            ancestor_xpath = "xpath=" + "/".join([".."] * _lvl)
+                            ancestor = err_el.locator(ancestor_xpath)
+                            if ancestor.count() == 0:
+                                break
+                            inp_candidate = ancestor.locator(
+                                "input[type='text'], input[type='number'], input:not([type])"
+                            ).first
+                            if inp_candidate.count() > 0:
+                                inp_loc = inp_candidate
+                                break
+                    if inp_loc is None:
+                        continue
+
+                    # Decimal constraint
+                    m_dec = re.search(
+                        r"decimal number larger than\s*([\d.]+)|"
+                        r"number\s+(?:larger|greater|more)\s+than\s*([\d.]+)",
+                        err_txt, re.I,
+                    )
+                    if m_dec:
+                        raw = next(g for g in m_dec.groups() if g and re.match(r"[\d.]+", g))
+                        dmin = float(raw)
+                        # Derive label for the input to pass to LLM
+                        _fb_label = ""
+                        try:
+                            _fb_label = (inp_loc.get_attribute("aria-label") or "").strip()
+                            if not _fb_label:
+                                _fid = (inp_loc.get_attribute("id") or "").strip()
+                                if _fid:
+                                    _lbl = scope.locator(f"label[for='{_fid}']")
+                                    if _lbl.count() > 0:
+                                        _fb_label = (_lbl.inner_text(timeout=400) or "").strip()
+                        except Exception:
+                            pass
+                        filled_fb = answer_question(_fb_label or "numeric field", "number", company=company, job_title=title, validation_error=err_txt)
+                        _m4 = re.search(r"\d+\.?\d*", filled_fb.value or "")
+                        try:
+                            num_val = float(_m4.group()) if _m4 else 0.0
+                        except ValueError:
+                            num_val = 0.0
+                        if num_val <= dmin:
+                            num_val = dmin + 1.0
+                        answer_str = f"{num_val:.1f}".rstrip("0").rstrip(".")
+                        print(f"DEBUG: fix_validation fallback decimal: label={_fb_label!r} → {answer_str!r}")
+                        inp_loc.click()
+                        inp_loc.fill(answer_str)
+                        _human_delay(0.2, 0.4)
+                        touched = True
+                        continue
+
+                    # Character-limit constraint
+                    char_limit_fb = _parse_char_limit_from_error(err_txt)
+                    if char_limit_fb:
+                        try:
+                            current = inp_loc.input_value() or ""
+                        except Exception:
+                            current = ""
+                        if len(current) > char_limit_fb:
+                            truncated = current[:char_limit_fb].rsplit(" ", 1)[0].rstrip(".,;: ") or current[:char_limit_fb]
+                            print(f"DEBUG: fix_validation fallback char-limit: trimming to {char_limit_fb} (was {len(current)})")
+                            inp_loc.click()
+                            inp_loc.fill(truncated)
+                            _human_delay(0.2, 0.4)
+                            touched = True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         return touched
 
     def _dismiss_modal(self, page: Page) -> None:
         try:
             # "Done" closes the "Application sent!" success modal after submit.
-            # It won't exist during an in-progress application, so this is safe.
             done_btn = page.locator("button:has-text('Done')").first
             if done_btn.count() > 0 and done_btn.is_visible():
                 done_btn.click()
                 _human_delay(0.5, 1)
                 return
 
-            dismiss = page.locator("button[aria-label='Dismiss'], button[aria-label='Dismiss application']").first
-            if dismiss.count() > 0 and dismiss.is_visible():
-                dismiss.click()
-                _human_delay(0.5, 1)
+            # If a Save/Discard confirmation dialog is already open, handle it directly.
             discard = page.locator("button:has-text('Discard')").first
             if discard.count() > 0 and discard.is_visible():
                 discard.click()
+                _human_delay(0.5, 1)
+                return
+
+            # Click the X / Dismiss button on the main modal.
+            dismiss = page.locator(
+                "button[aria-label='Dismiss'], "
+                "button[aria-label='Dismiss application'], "
+                "button[aria-label='Close']"
+            ).first
+            if dismiss.count() > 0 and dismiss.is_visible():
+                dismiss.click()
+                # Wait up to 6 seconds for LinkedIn's "Save this application?" confirmation
+                # dialog to appear, then click Discard.
+                deadline = time.time() + 6.0
+                while time.time() < deadline:
+                    _human_delay(0.4, 0.6)
+                    discard = page.locator("button:has-text('Discard')").first
+                    if discard.count() > 0 and discard.is_visible():
+                        discard.click()
+                        _human_delay(0.3, 0.6)
+                        return
+                    # Also check if the modal is already gone (no confirmation needed)
+                    if page.locator("[role='dialog']").count() == 0:
+                        return
         except Exception:
             pass
 

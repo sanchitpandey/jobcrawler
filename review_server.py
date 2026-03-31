@@ -32,43 +32,38 @@ app = Flask(__name__)
 def get_jobs_for_review(
     verdict_filter: str = "all",
     difficulty_filter: str = "all",
-    status_mode: str = "pending",   # "pending" | "approved"
+    status_mode: str = "pending",   # "pending" | "manual_review" | "approved"
 ) -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
     if status_mode == "approved":
-        sql = """
-            SELECT id, company, title, location, url,
-                   fit_score, comp_est, verdict, gaps,
-                   ats_type, difficulty
-            FROM   jobs
-            WHERE  status = 'approved'
-        """
+        status_clause = "status = 'approved'"
         params: list = []
-        if verdict_filter not in ("all", ""):
-            sql += " AND verdict = ?"
-            params.append(verdict_filter)
-        if difficulty_filter not in ("all", ""):
-            sql += " AND difficulty = ?"
-            params.append(difficulty_filter)
-        sql += " ORDER BY fit_score DESC LIMIT 500"
-    else:
-        sql = """
-            SELECT id, company, title, location, url,
-                   fit_score, comp_est, verdict, gaps,
-                   ats_type, difficulty
-            FROM   jobs
-            WHERE  fit_score >= ? AND status IN ('new', 'manual_review')
-        """
+        limit = 500
+    elif status_mode == "manual_review":
+        status_clause = "status = 'manual_review'"
+        params = []
+        limit = 200
+    else:  # pending — newly scraped jobs only
+        status_clause = "fit_score >= ? AND status = 'new'"
         params = [MIN_REVIEW_SCORE]
-        if verdict_filter not in ("all", ""):
-            sql += " AND verdict = ?"
-            params.append(verdict_filter)
-        if difficulty_filter not in ("all", ""):
-            sql += " AND difficulty = ?"
-            params.append(difficulty_filter)
-        sql += " ORDER BY fit_score DESC LIMIT 200"
+        limit = 200
+
+    sql = f"""
+        SELECT id, company, title, location, url,
+               fit_score, comp_est, verdict, gaps,
+               ats_type, difficulty
+        FROM   jobs
+        WHERE  {status_clause}
+    """
+    if verdict_filter not in ("all", ""):
+        sql += " AND verdict = ?"
+        params.append(verdict_filter)
+    if difficulty_filter not in ("all", ""):
+        sql += " AND difficulty = ?"
+        params.append(difficulty_filter)
+    sql += f" ORDER BY fit_score DESC LIMIT {limit}"
 
     rows = conn.execute(sql, params).fetchall()
     conn.close()
@@ -97,7 +92,7 @@ def approve_auto_jobs(min_score: int = MIN_REVIEW_SCORE) -> int:
         for r in conn.execute(
             """
             SELECT id FROM jobs
-            WHERE  status IN ('new', 'manual_review')
+            WHERE  status = 'new'
               AND  difficulty = 'auto'
               AND  fit_score  >= ?
             """,
@@ -153,11 +148,11 @@ def get_stats() -> dict:
             "SELECT COUNT(*) FROM jobs WHERE status=?", (status,)
         ).fetchone()[0]
 
-    # Count pending AUTO jobs (for the Quick Apply button label)
+    # Count pending AUTO jobs (new only — manual_review jobs need human attention)
     stats["pending_auto"] = conn.execute(
         """
         SELECT COUNT(*) FROM jobs
-        WHERE  status IN ('new','manual_review')
+        WHERE  status = 'new'
           AND  difficulty = 'auto'
           AND  fit_score  >= ?
         """,
@@ -225,12 +220,16 @@ HTML = """
                    border: 1px solid rgba(239,68,68,.35); }
   .btn-unapprove:hover { background: rgba(239,68,68,.30); }
 
-  /* Mode toggle (Pending / Approved) */
+  /* Mode toggle (Pending / Manual Review / Approved) */
   .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .mode-btn { padding: 6px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
               background: transparent; border: none; color: var(--muted); transition: all .15s; }
-  .mode-btn.active { background: var(--accent); color: #fff; }
-  .mode-btn:hover:not(.active) { background: var(--surface); color: var(--text); }
+  .mode-btn.active          { background: var(--accent); color: #fff; }
+  .mode-btn.active-manual   { background: var(--yellow);  color: #000; }
+  .mode-btn:hover:not(.active):not(.active-manual) { background: var(--surface); color: var(--text); }
+  .btn-reapprove { background: rgba(245,158,11,.18); color: var(--yellow);
+                   border: 1px solid rgba(245,158,11,.35); }
+  .btn-reapprove:hover { background: rgba(245,158,11,.30); }
 
   .spacer    { flex: 1; }
   .sel-count { color: var(--accent); font-weight: 600; font-size: 13px; min-width: 90px; }
@@ -311,8 +310,9 @@ HTML = """
 <div class="toolbar">
   <!-- Mode toggle -->
   <div class="mode-toggle">
-    <button class="mode-btn active" id="mode-pending" onclick="setMode('pending')">Pending Review</button>
-    <button class="mode-btn"        id="mode-approved" onclick="setMode('approved')">Approved (<span id="approved-count">&#8230;</span>)</button>
+    <button class="mode-btn active" id="mode-pending"       onclick="setMode('pending')">Pending Review</button>
+    <button class="mode-btn"        id="mode-manual_review" onclick="setMode('manual_review')">Manual Review (<span id="manual-count">&#8230;</span>)</button>
+    <button class="mode-btn"        id="mode-approved"      onclick="setMode('approved')">Approved (<span id="approved-count">&#8230;</span>)</button>
   </div>
 
   <!-- Separator -->
@@ -341,16 +341,22 @@ HTML = """
   <span class="sel-count" id="sel-count">0 selected</span>
   <button class="btn btn-selall" onclick="toggleSelectAll()">Select All</button>
   <!-- Pending-mode actions -->
-  <button class="btn btn-skip"      id="btn-skip"    onclick="actionSelected('skip')">Skip Selected</button>
-  <button class="btn btn-approve"   id="btn-approve" onclick="actionSelected('approve')">Approve Selected</button>
+  <button class="btn btn-skip"      id="btn-skip"       onclick="actionSelected('skip')">Skip Selected</button>
+  <button class="btn btn-approve"   id="btn-approve"    onclick="actionSelected('approve')">Approve Selected</button>
   <button class="btn btn-auto"      id="btn-quick-auto" onclick="quickApplyAuto()"
           title="Approve all AUTO-difficulty jobs that meet the score threshold">
     Quick Apply All AUTO (<span id="auto-count">&#8230;</span>)
   </button>
+  <!-- Manual-review-mode actions (hidden by default) -->
+  <button class="btn btn-reapprove" id="btn-reapprove"        style="display:none"
+          onclick="actionSelected('approve')"
+          title="Re-queue selected jobs for the bot to retry">Re-approve Selected</button>
+  <button class="btn btn-skip"      id="btn-skip-manual"      style="display:none"
+          onclick="actionSelected('skip')">Skip Selected</button>
   <!-- Approved-mode actions (hidden by default) -->
-  <button class="btn btn-unapprove" id="btn-unapprove" style="display:none"
+  <button class="btn btn-unapprove" id="btn-unapprove"        style="display:none"
           onclick="actionSelected('unapprove')">Unapprove Selected</button>
-  <button class="btn btn-skip"      id="btn-skip-approved" style="display:none"
+  <button class="btn btn-skip"      id="btn-skip-approved"    style="display:none"
           onclick="actionSelected('skip')">Skip Selected</button>
 </div>
 
@@ -384,7 +390,7 @@ HTML = """
 let allJobs = [];
 let currentVerdict = 'all';
 let currentDiff    = 'all';   // 'all' | 'auto' | 'hybrid' | 'manual'
-let currentMode    = 'pending'; // 'pending' | 'approved'
+let currentMode    = 'pending'; // 'pending' | 'manual_review' | 'approved'
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -417,11 +423,12 @@ async function loadStats() {
      </div>`
   ).join('');
 
-  // Quick Apply button count & approved count in mode toggle
+  // Quick Apply button count & mode toggle counts
   const autoCount = data.pending_auto || 0;
   document.getElementById('auto-count').textContent = autoCount;
   document.getElementById('btn-quick-auto').disabled = autoCount === 0;
   document.getElementById('approved-count').textContent = data.approved || 0;
+  document.getElementById('manual-count').textContent  = data.manual_review || 0;
 }
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
@@ -430,16 +437,21 @@ function setMode(mode) {
   currentMode = mode;
 
   // Update mode button styles
-  document.getElementById('mode-pending').classList.toggle('active',  mode === 'pending');
-  document.getElementById('mode-approved').classList.toggle('active', mode === 'approved');
+  document.getElementById('mode-pending').classList.toggle('active',        mode === 'pending');
+  document.getElementById('mode-manual_review').classList.toggle('active-manual', mode === 'manual_review');
+  document.getElementById('mode-approved').classList.toggle('active',       mode === 'approved');
 
-  // Show/hide action buttons
+  // Show/hide action buttons per mode
   const pending  = mode === 'pending';
-  document.getElementById('btn-skip').style.display          = pending ? '' : 'none';
-  document.getElementById('btn-approve').style.display       = pending ? '' : 'none';
-  document.getElementById('btn-quick-auto').style.display    = pending ? '' : 'none';
-  document.getElementById('btn-unapprove').style.display     = pending ? 'none' : '';
-  document.getElementById('btn-skip-approved').style.display = pending ? 'none' : '';
+  const manual   = mode === 'manual_review';
+  const approved = mode === 'approved';
+  document.getElementById('btn-skip').style.display          = pending  ? '' : 'none';
+  document.getElementById('btn-approve').style.display       = pending  ? '' : 'none';
+  document.getElementById('btn-quick-auto').style.display    = pending  ? '' : 'none';
+  document.getElementById('btn-reapprove').style.display     = manual   ? '' : 'none';
+  document.getElementById('btn-skip-manual').style.display   = manual   ? '' : 'none';
+  document.getElementById('btn-unapprove').style.display     = approved ? '' : 'none';
+  document.getElementById('btn-skip-approved').style.display = approved ? '' : 'none';
 
   loadJobs();
 }
@@ -568,7 +580,10 @@ async function actionSelected(action) {
   });
 
   if (action === 'approve') {
-    showToast(`${ids.length} job(s) approved — run python apply.py`, '#22c55e');
+    const msg = currentMode === 'manual_review'
+      ? `${ids.length} job(s) re-queued for bot retry — run python apply.py`
+      : `${ids.length} job(s) approved — run python apply.py`;
+    showToast(msg, '#22c55e');
   } else if (action === 'unapprove') {
     showToast(`${ids.length} job(s) moved back to review queue`, '#6366f1');
   } else {
