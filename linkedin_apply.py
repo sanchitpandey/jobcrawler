@@ -314,6 +314,44 @@ class LinkedInApplyBot:
 
         return result
 
+    def has_easy_apply(self, job_url: str, company: str = "", title: str = "") -> tuple[bool, str]:
+        page = self._page
+
+        try:
+            page.goto(job_url, wait_until="domcontentloaded", timeout=45_000)
+            _wait_for_page_ready(
+                page,
+                selectors=[
+                    ".jobs-details",
+                    ".jobs-search__job-details--container",
+                    ".jobs-unified-top-card",
+                    "button.jobs-apply-button",
+                    "main",
+                ],
+                timeout_ms=20000,
+            )
+            _human_delay(2, 4)
+            self._prepare_job_page(page)
+
+            redirect_msg = self._detect_redirected_away(page, job_url)
+            if redirect_msg:
+                return False, redirect_msg
+
+            if self._is_already_applied(page):
+                return True, "already_applied"
+
+            easy_apply_btn = self._find_easy_apply_button(page)
+            if easy_apply_btn is not None:
+                return True, "easy_apply"
+
+            return False, self._classify_apply_button_failure(page, company, title)
+        except PWTimeoutError as exc:
+            self._save_debug_snapshot(page, company, title, prefix="linkedin_verify_timeout")
+            return False, f"Timeout while verifying Easy Apply: {exc}"
+        except Exception as exc:
+            self._save_debug_snapshot(page, company, title, prefix="linkedin_verify_exception")
+            return False, str(exc)
+
     def _prepare_job_page(self, page: Page) -> None:
         page.mouse.wheel(0, 700)
         _human_delay(0.5, 1.0)

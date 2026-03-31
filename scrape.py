@@ -22,6 +22,47 @@ _site_failures: dict[str, int] = {}
 _SITE_FAILURE_LIMIT = 3
 
 
+def _verify_linkedin_easy_apply(jobs: pd.DataFrame) -> pd.DataFrame:
+    if jobs.empty or "site" not in jobs.columns or "job_url" not in jobs.columns:
+        return jobs
+
+    linkedin_mask = jobs["site"].astype(str).str.lower() == "linkedin"
+    linkedin_jobs = jobs[linkedin_mask].copy()
+    if linkedin_jobs.empty:
+        return jobs
+
+    from linkedin_apply import LinkedInApplyBot
+
+    print(f"  Verifying LinkedIn Easy Apply on {len(linkedin_jobs)} jobs...")
+    keep_indices: list[int] = []
+    rejected = 0
+
+    with LinkedInApplyBot(headless=True) as bot:
+        if not bot.login():
+            raise RuntimeError("LinkedIn Easy Apply verification requires a valid LinkedIn session.")
+
+        for checked, (idx, row) in enumerate(linkedin_jobs.iterrows(), start=1):
+            company = str(row.get("company", "") or "")
+            title = str(row.get("title", "") or "")
+            job_url = str(row.get("job_url", "") or "")
+
+            is_easy_apply, reason = bot.has_easy_apply(job_url, company=company, title=title)
+            if is_easy_apply:
+                keep_indices.append(idx)
+            else:
+                rejected += 1
+                print(f"    -> rejected: {company} | {title} | {reason}")
+
+            if checked % 10 == 0 or checked == len(linkedin_jobs):
+                print(f"    progress: {checked}/{len(linkedin_jobs)} checked, {rejected} rejected")
+
+    keep_mask = ~linkedin_mask
+    keep_mask.loc[keep_indices] = True
+    verified = jobs[keep_mask].reset_index(drop=True)
+    print(f"  LinkedIn Easy Apply verification kept {len(keep_indices)}/{len(linkedin_jobs)} jobs")
+    return verified
+
+
 def _scrape_term(term: str, location: str, sites: list[str]) -> pd.DataFrame | None:
     active_sites = [s for s in sites if _site_failures.get(s, 0) < _SITE_FAILURE_LIMIT]
     if not active_sites:
@@ -91,6 +132,7 @@ def run() -> pd.DataFrame:
     combined = combined.drop_duplicates(subset=["title", "company", "location"])
     combined = combined.drop_duplicates(subset=["job_url"])
     combined = combined.drop_duplicates(subset=["title", "company"])
+    combined = _verify_linkedin_easy_apply(combined)
 
     combined.to_csv(RAW_CSV, index=False)
 
