@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import get_settings
 from api.models.base import engine
 from api.models import Base  # noqa: F401 — imports all models so metadata is populated
-from api.routes import auth, forms
+from api.routes import auth, forms, jobs
 
 settings = get_settings()
 
@@ -41,6 +41,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(forms.router)
+app.include_router(jobs.router)
 
 
 @app.get("/health")
