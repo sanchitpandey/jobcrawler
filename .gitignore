@@ -1,7 +1,71 @@
+# ── Environment & secrets ──────────────────────────────────────────────────────
 .env
+**/.env
+.env.*
+!.env.example
 
-output
-resume
-__pycache__
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
 
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
 
+# Test & type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── SQLite (local dev DB) ──────────────────────────────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ── Node / Extension / Web ─────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# Extension build output
+extension/dist/
+web/dist/
+web/build/
+
+# npm / pnpm / yarn
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# ── Legacy pipeline artifacts ──────────────────────────────────────────────────
+output/
+resume/
+
+# ── OS ─────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ────────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── Claude / AI tooling ────────────────────────────────────────────────────────
+CLAUDE.md
+.claude/
+docs/

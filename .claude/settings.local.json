@@ -25,7 +25,8 @@
       "Bash(sqlite3 output/tracker.db \"UPDATE jobs SET status=''approved'' WHERE status=''manual_review'' AND \\(lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%''\\); SELECT changes\\(\\) || '' rows updated'';\")",
       "Bash(sqlite3 d:/AIML/jobcrawler/output/tracker.db \"SELECT id, company, title, status FROM jobs WHERE lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%'';\")",
       "Bash(sqlite3 d:/AIML/jobcrawler/output/tracker.db \":*)",
-      "Bash(sort -k6,7 -r)"
+      "Bash(sort -k6,7 -r)",
+      "Bash(python -c \"from api.models import Base; print\\('Models OK'\\)\")"
     ]
   }
 }
