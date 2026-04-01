@@ -14,11 +14,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.middleware.rate_limit import check_apply_limit, get_usage
+from api.logger import get_logger
+from api.middleware.rate_limit import check_apply_limit, check_llm_limit, get_usage
 from api.middleware.usage import record_usage
 from api.services.llm import current_model
 from api.models.application import Application
@@ -30,21 +31,23 @@ from api.services.filter import make_id
 from api.services.scorer import score_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+log = get_logger(__name__)
 
 _VALID_STATUSES = frozenset({
     "scored", "approved", "applying", "applied",
     "interview", "offer", "rejected", "manual_review", "skipped", "error",
 })
+_VALID_VERDICTS = frozenset({"strong_yes", "yes", "maybe", "skip"})
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class ScoreJobRequest(BaseModel):
-    id: str
-    title: str
-    company: str
-    location: str = ""
-    description: str = ""
+    id: str = Field(..., max_length=64)
+    title: str = Field(..., max_length=512)
+    company: str = Field(..., max_length=512)
+    location: str = Field("", max_length=256)
+    description: str = Field("", max_length=50_000)
     is_remote: bool = False
 
 
@@ -59,11 +62,11 @@ class ScoreJobResponse(BaseModel):
 
 class TrackJobRequest(BaseModel):
     """Persist a job (with optional score) into the application tracker."""
-    company: str
-    title: str
-    location: str = ""
-    url: str = ""
-    description: str = ""
+    company: str = Field(..., max_length=512)
+    title: str = Field(..., max_length=512)
+    location: str = Field("", max_length=256)
+    url: str = Field("", max_length=2048)
+    description: str = Field("", max_length=50_000)
     is_remote: bool = False
 
     # ATS metadata (from ats_router, resolved by extension)
@@ -160,7 +163,8 @@ async def _require_profile(user_id: str, db: AsyncSession) -> Profile:
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
-@router.post("/score-job", response_model=ScoreJobResponse)
+@router.post("/score-job", response_model=ScoreJobResponse,
+             dependencies=[Depends(check_llm_limit)])
 async def score_job_endpoint(
     req: ScoreJobRequest,
     current_user: User = Depends(get_current_user),
@@ -176,7 +180,11 @@ async def score_job_endpoint(
             profile_kv=profile.to_dict(),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Scoring failed: {exc}") from exc
+        log.error("Scoring failed for user %s: %s", current_user.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Scoring service temporarily unavailable. Please try again.",
+        ) from exc
 
     await record_usage(
         user_id=current_user.id,
@@ -271,6 +279,17 @@ async def list_jobs(
     db: AsyncSession = Depends(get_db),
 ) -> ApplicationListResponse:
     """List the current user's tracked applications."""
+    if status_filter and status_filter not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status {status_filter!r}. Valid values: {sorted(_VALID_STATUSES)}",
+        )
+    if verdict and verdict not in _VALID_VERDICTS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid verdict {verdict!r}. Valid values: {sorted(_VALID_VERDICTS)}",
+        )
+
     base = select(Application).where(Application.user_id == current_user.id)
 
     if status_filter:

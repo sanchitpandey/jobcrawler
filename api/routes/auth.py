@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ from api.models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=14)
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
@@ -33,7 +33,7 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
 
 
 class TokenResponse(BaseModel):

@@ -27,8 +27,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.config import get_settings
 from api.models.application import Application
 from api.models.base import get_db
+from api.models.llm_usage import LlmUsageLog
 from api.models.user import User
 from api.routes.auth import get_current_user
+
+
+def _day_start() -> datetime:
+    """Midnight UTC of the current day."""
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _seconds_until_tomorrow() -> int:
+    tomorrow = _day_start() + timedelta(days=1)
+    return max(1, int((tomorrow - datetime.now(timezone.utc)).total_seconds()))
 
 
 def week_start() -> datetime:
@@ -86,6 +98,40 @@ async def check_apply_limit(
                 f"per week. Upgrade to paid for unlimited applications."
             ),
             headers={"Retry-After": str(retry_after_seconds())},
+        )
+
+
+async def check_llm_limit(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Dependency — raises 429 when a free-tier user exceeds daily AI call quota.
+
+    Counts rows in llm_usage_logs for today.  Paid users bypass immediately.
+    Apply to any endpoint that triggers an LLM call.
+    """
+    if current_user.tier == "paid":
+        return
+
+    settings = get_settings()
+    result = await db.execute(
+        select(func.count())
+        .select_from(LlmUsageLog)
+        .where(
+            LlmUsageLog.user_id == current_user.id,
+            LlmUsageLog.created_at >= _day_start(),
+        )
+    )
+    used = result.scalar_one()
+
+    if used >= settings.free_tier_daily_llm_calls:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Free tier limit reached: {settings.free_tier_daily_llm_calls} AI calls per day. "
+                "Upgrade to paid for unlimited access."
+            ),
+            headers={"Retry-After": str(_seconds_until_tomorrow())},
         )
 
 

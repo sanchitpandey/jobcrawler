@@ -28,6 +28,7 @@ MANUAL_REVIEW_PATTERNS = re.compile(
 _answer_cache: dict[tuple[str, str], dict] = {}
 
 CACHE_TTL_DAYS = 30
+_CACHE_MAX_SIZE = 10_000   # evict oldest 10% when exceeded
 
 
 @dataclass
@@ -64,6 +65,11 @@ def _cache_get(user_id: str, question: str) -> FilledAnswer | None:
 
 
 def _cache_put(user_id: str, question: str, answer: FilledAnswer) -> None:
+    if len(_answer_cache) >= _CACHE_MAX_SIZE:
+        # Evict the oldest 10% (insertion-order guaranteed in Python 3.7+)
+        evict_count = _CACHE_MAX_SIZE // 10
+        for old_key in list(_answer_cache.keys())[:evict_count]:
+            del _answer_cache[old_key]
     key = _cache_key(user_id, question)
     _answer_cache[key] = {
         "value": answer.value,

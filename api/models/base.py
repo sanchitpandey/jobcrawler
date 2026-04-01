@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -10,6 +11,7 @@ from sqlalchemy.orm import DeclarativeBase
 from api.config import get_settings
 
 _settings = get_settings()
+_log = logging.getLogger("crawler.db")
 
 _is_sqlite = _settings.database_url.startswith("sqlite")
 
@@ -36,5 +38,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             yield session
             await session.commit()
         except Exception:
+            _log.exception("Database session error; rolling back")
             await session.rollback()
             raise

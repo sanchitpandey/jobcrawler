@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,17 +67,17 @@ class ProfilePayload(BaseModel):
     eeo: dict[str, str] | None = None
 
     # Job search preferences
-    preferred_roles: str | None = None
-    target_locations: str | None = None
-    avoid_roles: str | None = None
-    avoid_companies: str | None = None
-    minimum_compensation: str | None = None
-    must_have_preferences: str | None = None
-    deal_breakers: str | None = None
+    preferred_roles: str | None = Field(None, max_length=2000)
+    target_locations: str | None = Field(None, max_length=1000)
+    avoid_roles: str | None = Field(None, max_length=2000)
+    avoid_companies: str | None = Field(None, max_length=2000)
+    minimum_compensation: str | None = Field(None, max_length=500)
+    must_have_preferences: str | None = Field(None, max_length=2000)
+    deal_breakers: str | None = Field(None, max_length=2000)
 
     # Candidate summary
-    candidate_summary: str | None = None
-    experience_highlights: str | None = None
+    candidate_summary: str | None = Field(None, max_length=5000)
+    experience_highlights: str | None = Field(None, max_length=5000)
 
     # Short answers  {"why_ml_engineering": "...", ...}
     short_answers: dict[str, str] | None = None
@@ -85,8 +85,8 @@ class ProfilePayload(BaseModel):
     # Filtering / scoring preferences
     blacklist_companies: list[str] | None = None
     blacklist_keywords: list[str] | None = None
-    min_comp_lpa: int | None = None
-    target_comp_lpa: int | None = None
+    min_comp_lpa: int | None = Field(None, ge=0, le=10_000_000)
+    target_comp_lpa: int | None = Field(None, ge=0, le=10_000_000)
 
 
 class ProfileResponse(BaseModel):
@@ -393,9 +393,12 @@ async def update_profile(
     return _profile_to_response(profile)
 
 
+_MAX_MARKDOWN_BYTES = 100_000  # 100 KB
+
+
 @router.post("/import-markdown", response_model=ProfileResponse)
 async def import_markdown(
-    markdown: str = Body(..., media_type="text/plain"),
+    markdown: str = Body(..., media_type="text/plain", max_length=_MAX_MARKDOWN_BYTES),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProfileResponse:

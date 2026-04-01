@@ -3,6 +3,9 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from api.config import get_settings
 from api.logger import get_logger, setup_logging
@@ -13,10 +16,24 @@ from api.routes import auth, forms, jobs, profiles
 
 settings = get_settings()
 
-# Configure logging before the first log line (import-time loggers use whatever
-# basicConfig set; routes and handlers will use this config).
+# Configure logging before the first log line.
 setup_logging(app_env=settings.app_env, debug=settings.debug)
 log = get_logger(__name__)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach security headers to every response."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        if settings.app_env == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
 
 @asynccontextmanager
@@ -43,13 +60,14 @@ app = FastAPI(
     redoc_url=None,
 )
 
-# Middleware order: outermost first (CORS → logging → route handlers)
+# Middleware order: outermost first (security headers → CORS → logging → route handlers)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(RequestLoggingMiddleware)
 
