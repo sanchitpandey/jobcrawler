@@ -19,8 +19,10 @@ try:
 except ImportError:
     _GOOGLE_AUTH_AVAILABLE = False
 
+from api.logger import get_logger
+
 load_dotenv()
-log = logging.getLogger("crawler.providers")
+log = get_logger(__name__)
 
 
 @dataclass

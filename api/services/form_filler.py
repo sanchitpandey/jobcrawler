@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import api.services.llm as llm_service
+from api.logger import get_logger
 
-log = logging.getLogger("crawler.form_filler")
+log = get_logger(__name__)
 
 # Matches labels that expect a pure integer answer (years / months of experience).
 _YEARS_EXP_LABEL_PATTERN = re.compile(r"\byrs?\b.*exp|\byears?\b.*exp|years? of exp", re.I)
@@ -207,22 +208,22 @@ async def _ask_llm(
     max_tok = 20 if (_numeric_error or field_type == "number") else 200
 
     try:
-        answer = await llm_service.chat(prompt, max_tokens=max_tok, temperature=0.1)
+        answer, tokens = await llm_service.chat_with_tokens(prompt, max_tokens=max_tok, temperature=0.1)
     except Exception as exc:
         log.warning("LLM call failed during form fill: %s", str(exc)[:120])
-        return FilledAnswer("", "manual_review", True, question)
+        return FilledAnswer("", "manual_review", True, question), 0
 
     if not answer or answer == "MANUAL_REVIEW":
-        return FilledAnswer("", "manual_review", True, question)
+        return FilledAnswer("", "manual_review", True, question), tokens
 
     if options and answer not in options:
         matched = _match_option(answer, options)
         if matched:
             answer = matched
         else:
-            return FilledAnswer("", "manual_review", True, question, 0.0)
+            return FilledAnswer("", "manual_review", True, question, 0.0), tokens
 
-    return FilledAnswer(answer, "llm", raw_question=question, confidence=0.85)
+    return FilledAnswer(answer, "llm", raw_question=question, confidence=0.85), tokens
 
 
 async def answer_question_for_user(
@@ -240,7 +241,7 @@ async def answer_question_for_user(
     log.debug("Answering question: %r", question[:80])
 
     if MANUAL_REVIEW_PATTERNS.search(question):
-        return FilledAnswer("", "manual_review", True, question)
+        return FilledAnswer("", "manual_review", True, question), 0
 
     standard_patterns = build_standard_patterns(candidate)
     for pattern, answer_fn in standard_patterns:
@@ -249,19 +250,19 @@ async def answer_question_for_user(
             if options:
                 matched = _match_option(raw_value, options)
                 if matched:
-                    return FilledAnswer(matched, "pattern", raw_question=question)
+                    return FilledAnswer(matched, "pattern", raw_question=question), 0
             else:
-                return FilledAnswer(raw_value, "pattern", raw_question=question)
+                return FilledAnswer(raw_value, "pattern", raw_question=question), 0
 
     # Bypass cache when a validation error is present so the LLM sees the error context
     if not validation_error:
         cached = _cache_get(user_id, question)
         if cached is not None:
-            return cached
+            return cached, 0
 
-    result = await _ask_llm(question, field_type, options, company, job_title, profile_text, validation_error)
+    result, tokens = await _ask_llm(question, field_type, options, company, job_title, profile_text, validation_error)
 
     if not result.is_manual_review and not validation_error:
         _cache_put(user_id, question, result)
 
-    return result
+    return result, tokens

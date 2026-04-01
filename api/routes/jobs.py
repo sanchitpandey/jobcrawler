@@ -19,6 +19,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.middleware.rate_limit import check_apply_limit, get_usage
+from api.middleware.usage import record_usage
+from api.services.llm import current_model
 from api.models.application import Application
 from api.models.base import get_db
 from api.models.profile import Profile
@@ -168,13 +170,21 @@ async def score_job_endpoint(
     profile = await _require_profile(current_user.id, db)
 
     try:
-        scored = await score_job(
+        scored, tokens = await score_job(
             job_dict=req.model_dump(),
             profile_text=profile.to_text(),
             profile_kv=profile.to_dict(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Scoring failed: {exc}") from exc
+
+    await record_usage(
+        user_id=current_user.id,
+        tokens=tokens,
+        model=current_model(),
+        call_type="score",
+        db=db,
+    )
 
     return ScoreJobResponse(
         id=scored["id"],

@@ -12,12 +12,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.middleware.usage import record_usage
 from api.models.base import get_db
 from api.models.profile import Profile
 from api.models.user import User
 from api.routes.auth import get_current_user
 from api.services.cover_letter import generate_cover
 from api.services.form_filler import FilledAnswer, answer_question_for_user
+from api.services.llm import current_model
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -80,8 +82,9 @@ async def answer_fields(
     profile_text = profile.to_text()
 
     answers: list[AnswerItem] = []
+    total_tokens = 0
     for field in req.fields:
-        filled: FilledAnswer = await answer_question_for_user(
+        filled, tokens = await answer_question_for_user(
             question_text=field.label,
             field_type=field.field_type,
             options=field.options,
@@ -91,6 +94,7 @@ async def answer_fields(
             profile_text=profile_text,
             user_id=current_user.id,
         )
+        total_tokens += tokens
         answers.append(
             AnswerItem(
                 label=field.label,
@@ -99,6 +103,15 @@ async def answer_fields(
                 confidence=filled.confidence,
                 is_manual_review=filled.is_manual_review,
             )
+        )
+
+    if total_tokens > 0:
+        await record_usage(
+            user_id=current_user.id,
+            tokens=total_tokens,
+            model=current_model(),
+            call_type="form_fill",
+            db=db,
         )
 
     return AnswerFieldsResponse(answers=answers)
@@ -120,7 +133,7 @@ async def generate_cover_letter(
         )
 
     try:
-        letter = await generate_cover(
+        letter, tokens = await generate_cover(
             job_dict=req.model_dump(),
             profile_text=profile.to_text(),
         )
@@ -129,5 +142,13 @@ async def generate_cover_letter(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Cover letter generation failed: {exc}",
         ) from exc
+
+    await record_usage(
+        user_id=current_user.id,
+        tokens=tokens,
+        model=current_model(),
+        call_type="cover_letter",
+        db=db,
+    )
 
     return GenerateCoverResponse(cover_letter=letter)

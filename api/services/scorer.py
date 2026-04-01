@@ -7,9 +7,10 @@ import logging
 import re
 from string import Template
 
-from api.services.llm import chat
+from api.logger import get_logger
+from api.services.llm import chat_with_tokens
 
-log = logging.getLogger("crawler.scorer")
+log = get_logger(__name__)
 
 # ── Prompt ─────────────────────────────────────────────────────────────────────
 # Preserved exactly from legacy/score.py (PROMPT_TEMPLATE).
@@ -447,10 +448,10 @@ async def score_job(
     prompt = _build_prompt(profile_text, policy, job_dict)
 
     job_id = str(job_dict.get("id", ""))
-    raw = await chat(prompt, max_tokens=8192)
+    raw, tokens = await chat_with_tokens(prompt, max_tokens=8192)
     results = _parse_response(raw, {job_id})
 
     if not results:
         raise ValueError(f"LLM returned no valid score for job id={job_id!r}. Raw: {raw[:200]!r}")
 
-    return results[0]
+    return results[0], tokens

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import textwrap
 
-from api.services.llm import chat
+from api.services.llm import chat_with_tokens
 
 COVER_PROMPT = textwrap.dedent("""
 Using the candidate profile below, write a professional cover letter for this job.
@@ -57,4 +57,4 @@ async def generate_cover(job_dict: dict, profile_text: str) -> str:
         location=job_dict.get("location", ""),
         description=str(job_dict.get("description", ""))[:2000],
     )
-    return await chat(prompt, max_tokens=600, temperature=0.3)
+    return await chat_with_tokens(prompt, max_tokens=600, temperature=0.3)

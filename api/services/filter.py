@@ -15,7 +15,9 @@ import hashlib
 import logging
 import re
 
-log = logging.getLogger("crawler.filter")
+from api.logger import get_logger
+
+log = get_logger(__name__)
 
 
 def make_id(company: str, title: str, location: str) -> str:
