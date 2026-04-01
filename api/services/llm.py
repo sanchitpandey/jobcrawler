@@ -267,3 +267,23 @@ async def chat(prompt: str, max_tokens: int = 900, temperature: float = 0.1) -> 
     """Convenience wrapper for backward compatibility with ported services."""
     text, _ = await _get_service().chat(prompt, max_tokens=max_tokens, temperature=temperature)
     return text
+
+
+async def chat_with_tokens(
+    prompt: str,
+    max_tokens: int = 900,
+    temperature: float = 0.1,
+) -> tuple[str, int]:
+    """Like ``chat()`` but also returns the token count consumed.
+
+    Use this when you need to record usage for billing::
+
+        text, tokens = await chat_with_tokens(prompt)
+        await record_usage(user_id=..., tokens=tokens, model=current_model(), ...)
+    """
+    return await _get_service().chat(prompt, max_tokens=max_tokens, temperature=temperature)
+
+
+def current_model() -> str:
+    """Return the name of the model that will be used for the next LLM call."""
+    return _get_service().current_model

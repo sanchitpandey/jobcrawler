@@ -16,6 +16,7 @@ from api.models.base import get_db
 from api.models.profile import Profile
 from api.models.user import User
 from api.routes.auth import get_current_user
+from api.services.cover_letter import generate_cover
 from api.services.form_filler import FilledAnswer, answer_question_for_user
 
 router = APIRouter(prefix="/forms", tags=["forms"])
@@ -45,6 +46,17 @@ class AnswerItem(BaseModel):
 
 class AnswerFieldsResponse(BaseModel):
     answers: list[AnswerItem]
+
+
+class GenerateCoverRequest(BaseModel):
+    company: str
+    title: str
+    location: str = ""
+    description: str = ""
+
+
+class GenerateCoverResponse(BaseModel):
+    cover_letter: str
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -90,3 +102,32 @@ async def answer_fields(
         )
 
     return AnswerFieldsResponse(answers=answers)
+
+
+@router.post("/generate-cover", response_model=GenerateCoverResponse)
+async def generate_cover_letter(
+    req: GenerateCoverRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GenerateCoverResponse:
+    result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
+    profile = result.scalar_one_or_none()
+
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found. Please complete your profile before generating cover letters.",
+        )
+
+    try:
+        letter = await generate_cover(
+            job_dict=req.model_dump(),
+            profile_text=profile.to_text(),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Cover letter generation failed: {exc}",
+        ) from exc
+
+    return GenerateCoverResponse(cover_letter=letter)
