@@ -130,3 +130,23 @@ export async function generateCover(jobDescription: string): Promise<string> {
   const data = (await response.json()) as { cover_letter: string };
   return data.cover_letter;
 }
+
+export interface UsageResponse {
+  used: number;
+  limit: number;       // -1 means unlimited (paid tier)
+  resets_at: string;
+  is_paid: boolean;
+}
+
+export async function getUsage(): Promise<UsageResponse> {
+  const token = await getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token.access_token}`;
+  }
+  const response = await fetch(`${API_BASE}/jobs/usage`, { headers });
+  if (!response.ok) {
+    throw new Error(`getUsage failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<UsageResponse>;
+}

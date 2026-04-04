@@ -44,6 +44,7 @@ export type Message =
   | { type: "ANSWER_FIELDS_RESULT"; payload: FillResponse }
   | { type: "GENERATE_COVER"; payload: { jobDescription: string } }
   | { type: "GENERATE_COVER_RESULT"; payload: { cover_letter: string } }
+  | { type: "SHOW_SCORE"; payload: ScoreResponse }
   | { type: "GET_AUTH_TOKEN" }
   | { type: "AUTH_TOKEN_RESULT"; payload: AuthToken | null }
   | { type: "CLEAR_AUTH_TOKEN" }
