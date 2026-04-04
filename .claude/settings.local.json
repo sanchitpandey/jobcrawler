@@ -26,7 +26,16 @@
       "Bash(sqlite3 d:/AIML/jobcrawler/output/tracker.db \"SELECT id, company, title, status FROM jobs WHERE lower\\(company\\) LIKE ''%methdai%'' OR lower\\(company\\) LIKE ''%smart working%'' OR lower\\(company\\) LIKE ''%exl%'';\")",
       "Bash(sqlite3 d:/AIML/jobcrawler/output/tracker.db \":*)",
       "Bash(sort -k6,7 -r)",
-      "Bash(python -c \"from api.models import Base; print\\('Models OK'\\)\")"
+      "Bash(python -c \"from api.models import Base; print\\('Models OK'\\)\")",
+      "WebSearch",
+      "WebFetch(domain:razorpay.com)",
+      "WebFetch(domain:www.cashfree.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(wc -l /d/AIML/jobcrawler/api/tests/*.py)",
+      "Bash(xargs wc:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)"
     ]
   }
 }
