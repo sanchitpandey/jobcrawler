@@ -10,10 +10,10 @@ GET  /auth/me        — return current user info
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,6 @@ from api.models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=14)
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
@@ -59,11 +58,11 @@ class RefreshRequest(BaseModel):
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _hash_password(plain: str) -> str:
-    return _pwd_context.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=14)).decode()
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def _create_token(subject: str, expires_delta: timedelta, token_type: str = "access") -> str:
@@ -107,7 +106,7 @@ async def get_current_user(
     except JWTError:
         raise credentials_exc
 
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise credentials_exc
@@ -172,7 +171,7 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)) -> To
     except JWTError:
         raise credentials_exc
 
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise credentials_exc

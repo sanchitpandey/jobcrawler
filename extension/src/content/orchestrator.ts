@@ -18,17 +18,17 @@ interface SiteHandler {
   init(): void;
 }
 
-/**
- * Resolve the right handler module for a detected platform.
- * Dynamic imports are inlined by esbuild (no splitting needed) while still
- * keeping each handler in its own source file.
- */
+import * as linkedinHandler from "./sites/linkedin.js";
+import * as indeedHandler from "./sites/indeed.js";
+import * as greenhouseHandler from "./sites/greenhouse.js";
+import * as leverHandler from "./sites/lever.js";
+
 async function loadHandler(platform: string): Promise<SiteHandler | null> {
   switch (platform) {
-    case "linkedin":   return import("./sites/linkedin.js");
-    case "indeed":     return import("./sites/indeed.js");
-    case "greenhouse": return import("./sites/greenhouse.js");
-    case "lever":      return import("./sites/lever.js");
+    case "linkedin":   return linkedinHandler;
+    case "indeed":     return indeedHandler;
+    case "greenhouse": return greenhouseHandler;
+    case "lever":      return leverHandler;
     default:           return null; // ashby / workday / icims: overlay only
   }
 }
@@ -47,7 +47,7 @@ function main(): void {
   const match = detectATS(window.location.href);
   if (!match) return;
 
-  console.debug(
+  console.log(
     `[JobCrawler] ${match.platform} detected (difficulty: ${match.difficulty})`
   );
 

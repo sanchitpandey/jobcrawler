@@ -14,8 +14,8 @@ from api.logger import get_logger
 
 log = get_logger(__name__)
 
-# Matches labels that expect a pure integer answer (years / months of experience).
-_YEARS_EXP_LABEL_PATTERN = re.compile(r"\byrs?\b.*exp|\byears?\b.*exp|years? of exp", re.I)
+# Matches labels that generally expect a numeric or duration logic
+_NUMERIC_HINT_PATTERN = re.compile(r"\byrs?\b.*exp|\byears?\b.*exp|duration|period|length|salary|ctc|expected|present|current", re.I)
 
 MANUAL_REVIEW_PATTERNS = re.compile(
     r"describe (a time|an experience|when|how)|tell us about|cover letter|"
@@ -24,12 +24,42 @@ MANUAL_REVIEW_PATTERNS = re.compile(
     re.I,
 )
 
-# TODO: Migrate to Redis cache keyed by (user_id, normalized_question)
-_answer_cache: dict[tuple[str, str], dict] = {}
+import os
+from pathlib import Path
 
+# TODO: Migrate to Redis cache in production
+CACHE_DIR = Path("output/cache")
 CACHE_TTL_DAYS = 30
-_CACHE_MAX_SIZE = 10_000   # evict oldest 10% when exceeded
+_CACHE_MAX_SIZE = 10_000
 
+_memory_cache: dict[tuple[str, str], dict] = None
+
+def _load_cache() -> dict[tuple[str, str], dict]:
+    global _memory_cache
+    if _memory_cache is not None:
+        return _memory_cache
+    
+    _memory_cache = {}
+    if not CACHE_DIR.exists():
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        
+    for cache_file in CACHE_DIR.glob("user_*.json"):
+        user_id = cache_file.stem.split("_", 1)[1]
+        try:
+            user_data = json.loads(cache_file.read_text(encoding="utf-8"))
+            for q, entry in user_data.items():
+                _memory_cache[(user_id, q)] = entry
+        except Exception:
+            pass
+    return _memory_cache
+
+def _persist_cache_for_user(user_id: str) -> None:
+    cache = _load_cache()
+    user_data = {q: entry for (u, q), entry in cache.items() if u == user_id}
+    if not CACHE_DIR.exists():
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    file_path = CACHE_DIR / f"user_{user_id}.json"
+    file_path.write_text(json.dumps(user_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 @dataclass
 class FilledAnswer:
@@ -47,11 +77,13 @@ def _cache_key(user_id: str, question: str) -> tuple[str, str]:
 
 def _cache_get(user_id: str, question: str) -> FilledAnswer | None:
     key = _cache_key(user_id, question)
-    entry = _answer_cache.get(key)
+    cache = _load_cache()
+    entry = cache.get(key)
     if entry is None:
         return None
     if datetime.now() - datetime.fromisoformat(entry["cached_at"]) > timedelta(days=CACHE_TTL_DAYS):
-        del _answer_cache[key]
+        del cache[key]
+        _persist_cache_for_user(user_id)
         log.debug("Cache entry expired for key: %r", question[:60])
         return None
     log.debug("Cache hit: %r", question[:60])
@@ -65,13 +97,16 @@ def _cache_get(user_id: str, question: str) -> FilledAnswer | None:
 
 
 def _cache_put(user_id: str, question: str, answer: FilledAnswer) -> None:
-    if len(_answer_cache) >= _CACHE_MAX_SIZE:
-        # Evict the oldest 10% (insertion-order guaranteed in Python 3.7+)
-        evict_count = _CACHE_MAX_SIZE // 10
-        for old_key in list(_answer_cache.keys())[:evict_count]:
-            del _answer_cache[old_key]
     key = _cache_key(user_id, question)
-    _answer_cache[key] = {
+    cache = _load_cache()
+    
+    if len(cache) >= _CACHE_MAX_SIZE:
+        sorted_keys = sorted(cache.keys(), key=lambda k: cache[k]["cached_at"])
+        evict_count = _CACHE_MAX_SIZE // 10
+        for k in sorted_keys[:evict_count]:
+            del cache[k]
+            
+    cache[key] = {
         "value": answer.value,
         "source": answer.source,
         "is_manual_review": answer.is_manual_review,
@@ -79,48 +114,30 @@ def _cache_put(user_id: str, question: str, answer: FilledAnswer) -> None:
         "confidence": answer.confidence,
         "cached_at": datetime.now().isoformat(),
     }
+    _persist_cache_for_user(user_id)
 
 
-def _ctc_fallback(raw: str, candidate: dict) -> str:
-    """Return raw if it's a parseable positive number; else fall back to target_comp_lpa × 100000."""
-    try:
-        val = float(re.sub(r"[^\d.]", "", raw))
-        if val > 0:
-            return raw
-    except (ValueError, TypeError):
-        pass
-    target = candidate.get("target_comp_lpa", 0)
-    return str(int(target) * 100_000)
-
+def _get_national_phone(phone: str) -> str:
+    """If phone is '+91-8527104455', returns '8527104455' to avoid duplication."""
+    phone = phone.strip()
+    if phone.startswith("+"):
+        if "-" in phone:
+            return phone.split("-", 1)[1].strip()
+        if " " in phone:
+            return phone.split(" ", 1)[1].strip()
+    return phone
 
 def build_standard_patterns(candidate: dict) -> list[tuple[re.Pattern[str], callable]]:
-    """Build the STANDARD_PATTERNS list bound to the given candidate dict."""
+    """Build the STANDARD_PATTERNS list bound to the given candidate dict.
+    Note: We only map hardcoded patterns for absolute basic identifiers.
+    For everything else, we let the LLM dynamically decide based on field type and error states.
+    """
     return [
-        (re.compile(r"\bemail\b", re.I), lambda: candidate["email"]),
-        (re.compile(r"\bphone|mobile|contact\b", re.I), lambda: candidate["phone"]),
+        (re.compile(r"^\s*email\s*$", re.I), lambda: candidate["email"]),
+        (re.compile(r"phone|mobile|contact number", re.I), lambda: _get_national_phone(candidate.get("phone", ""))),
         (re.compile(r"\blinkedin\b", re.I), lambda: candidate["linkedin"]),
-        (re.compile(r"\bgithub|portfolio\b", re.I), lambda: candidate["github"]),
-        (re.compile(r"current.*(ctc|salary|comp)|present.*(ctc|salary)", re.I), lambda: candidate["current_ctc"]),
-        (re.compile(r"expected.*(ctc|salary|comp)|desired.*(ctc|salary)", re.I), lambda: _ctc_fallback(candidate["expected_ctc"], candidate)),
-        (re.compile(r"notice period|joining period", re.I), lambda: candidate["notice_period"]),
-        (re.compile(r"(when|available).*(start|join)|start date|availability", re.I), lambda: candidate["start_date"]),
-        (re.compile(r"cgpa|gpa|percentage|aggregate", re.I), lambda: candidate["cgpa"]),
-        (re.compile(r"\b(college|university)\b|educational institution|alma mater", re.I), lambda: candidate["college"]),
-        (re.compile(r"graduation year|passing year|batch", re.I), lambda: candidate.get("graduation_year", candidate.get("graduation_month_year", ""))),
-        (re.compile(r"degree|qualification", re.I), lambda: candidate["degree"]),
-        # Exact-match guard prevents "Python experience" / "GCP experience" from hitting this
-        (re.compile(r"^(?:how many )?(?:years of )?(?:total )?(?:work )?experience(?: do you have)?\??$", re.I), lambda: candidate["total_experience"]),
-        (re.compile(r"python.*(?:years?|exp)", re.I), lambda: candidate["python_years"]),
-        (re.compile(r"(?:pytorch|tensorflow).*(?:years?|exp)", re.I), lambda: candidate["pytorch_years"]),
-        (re.compile(r"(?:hugging\s?face|hf|transformers).*(?:years?|exp)", re.I), lambda: candidate["huggingface_years"]),
-        (re.compile(r"(?:llm|rag|nlp|nlu|bert|gpt).*(?:years?|exp)", re.I), lambda: candidate.get("llm_nlp_rag_years", candidate.get("llm_years", ""))),
-        (re.compile(r"(?:machine learning|ml).*(?:years?|exp)", re.I), lambda: candidate["ml_years"]),
-        (re.compile(r"work auth|authorized to work|eligible to work", re.I), lambda: candidate["work_authorization"]),
-        (re.compile(r"(?:visa|sponsorship).*(?:require|need|sponsor)", re.I), lambda: candidate["sponsorship_required"]),
-        (re.compile(r"(?:willing|open).*(?:relocat)|can you relocat", re.I), lambda: candidate["willing_to_relocate"]),
-        (re.compile(r"\bgender\b", re.I), lambda: candidate["gender"]),
-        (re.compile(r"veteran", re.I), lambda: candidate["veteran_status"]),
-        (re.compile(r"disability|disabled", re.I), lambda: candidate["disability"]),
+        (re.compile(r"\bgithub\b", re.I), lambda: candidate["github"]),
+        (re.compile(r"\bportfolio\b", re.I), lambda: candidate["portfolio"]),
     ]
 
 
@@ -171,27 +188,27 @@ async def _ask_llm(
         f"\nAvailable options (pick exactly one verbatim): {json.dumps(options)}" if options else ""
     )
     numeric_hint = (
-        " For fields asking years of experience (e.g. 'years of experience', 'yrs of exp'),"
-        " answer with ONLY a number (e.g., '1' or '2')."
-        " Never include text like 'years' or parenthetical explanations."
-    ) if _YEARS_EXP_LABEL_PATTERN.search(question) else ""
+        " If the question asks for years of experience, a duration (like notice period), or compensation (CTC/salary), "
+        "and the field type is a number or text, provide ONLY the raw numeric value (e.g. '0', '2', '1500000'). "
+        "Never include text like 'years', 'days', or parenthetical explanations."
+    ) if _NUMERIC_HINT_PATTERN.search(question) else ""
 
     _numeric_error = bool(
         validation_error and re.search(
-            r"decimal|number|numerical|\d+\s*(or\s*)?larger|greater than", validation_error, re.I
+            r"decimal|number|numerical|integer|\d+\s*(or\s*)?larger|greater than", validation_error, re.I
         )
     )
     if validation_error:
         if _numeric_error:
             error_hint = (
-                f"\nIMPORTANT — The previous answer was rejected: \"{validation_error}\". "
-                "The field requires a NUMBER. "
+                f"\nIMPORTANT — The previous answer was rejected with error: \"{validation_error}\". "
+                "The field explicitly requires a NUMBER. "
                 "Output ONLY a single number (digits and optional decimal point, nothing else). "
-                "Example valid answers: 0.5  1  2  3.5"
+                "Example valid answers: 0  15  1500000"
             )
         else:
             error_hint = (
-                f"\nIMPORTANT — The previous answer was rejected: \"{validation_error}\". "
+                f"\nIMPORTANT — The previous answer was rejected with error: \"{validation_error}\". "
                 "Your new answer MUST satisfy this constraint."
             )
     else:
@@ -200,15 +217,15 @@ async def _ask_llm(
     prompt = (
         "You fill job application forms for a candidate. "
         "Answer only the question asked. "
-        "For dropdowns and radio buttons, output exactly one listed option. "
-        "For text answers, keep the answer concise. "
+        "For dropdowns, radio buttons, or checkbox options, output exactly one listed option verbatim. "
+        "For text answers, keep the answer extremely concise and literal. "
         "If a truthful answer requires a personal anecdote or unknown detail, output MANUAL_REVIEW."
         + numeric_hint
         + error_hint
         + f"\n\nCandidate profile:\n{profile_text}\n\n"
         f"Applying to: {company} - {job_title}\n\n"
         f'Question: "{question}"\n'
-        f"Field type: {field_type}{options_str}\n\nAnswer:"
+        f"Input Field Type: {field_type}{options_str}\n\nAnswer:"
     )
 
     max_tok = 20 if (_numeric_error or field_type == "number") else 200

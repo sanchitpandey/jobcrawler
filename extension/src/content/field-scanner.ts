@@ -136,6 +136,18 @@ export function labelForGroup(
   return labelForElement(first);
 }
 
+// ── Error resolution ────────────────────────────────────────────────────────────
+// LinkedIn puts error messages in specific elements, usually near the input.
+export function errorForElement(el: Element): string {
+  const container = el.closest(".jobs-easy-apply-form-section__grouping, .fb-dash-form-element, fieldset") ?? el.parentElement;
+  if (!container) return "";
+
+  const errNode = container.querySelector(
+    ".artdeco-inline-feedback__message, .fb-dash-form-element__error-field, [id*='-error']"
+  );
+  return errNode?.textContent?.trim() ?? "";
+}
+
 // ── Main scanner ──────────────────────────────────────────────────────────────
 
 const SKIP_TYPES = new Set([
@@ -184,6 +196,7 @@ export function scanFields(root: Document | Element): ApiField[] {
   for (const { type, elements } of radioMap.values()) {
     const label = labelForGroup(elements);
     if (!label) continue;
+    const error = errorForElement(elements[0]);
     const options = elements
       .map((el) => el.getAttribute("value") ?? el.value ?? "")
       .filter(Boolean);
@@ -192,7 +205,15 @@ export function scanFields(root: Document | Element): ApiField[] {
       label,
       type,
       options,
+      error,
     });
+  }
+
+  function ensureId(el: Element) {
+      if (!el.id) {
+          el.id = `jc-${Math.random().toString(36).substring(2, 10)}`;
+      }
+      return el.id;
   }
 
   // ── Pass 2: plain inputs (not hidden/submit/button/radio/checkbox) ─────────
@@ -203,7 +224,8 @@ export function scanFields(root: Document | Element): ApiField[] {
     }
     const label = labelForElement(input);
     if (!label) continue;
-    addField({ name: input.getAttribute("name") ?? "", label, type: rawType });
+    const error = errorForElement(input);
+    addField({ name: input.getAttribute("name") ?? "", label, type: rawType, id: ensureId(input), error });
   }
 
   // ── Pass 3: <select> ──────────────────────────────────────────────────────
@@ -212,6 +234,7 @@ export function scanFields(root: Document | Element): ApiField[] {
   )) {
     const label = labelForElement(select);
     if (!label) continue;
+    const error = errorForElement(select);
     const options = Array.from(select.querySelectorAll("option"))
       .filter((opt) => opt.value !== "")
       .map((opt) => opt.textContent?.trim() ?? "")
@@ -221,6 +244,8 @@ export function scanFields(root: Document | Element): ApiField[] {
       label,
       type: "select",
       options,
+      id: ensureId(select),
+      error,
     });
   }
 
@@ -230,10 +255,13 @@ export function scanFields(root: Document | Element): ApiField[] {
   )) {
     const label = labelForElement(textarea);
     if (!label) continue;
+    const error = errorForElement(textarea);
     addField({
       name: textarea.getAttribute("name") ?? "",
       label,
       type: "textarea",
+      id: ensureId(textarea),
+      error,
     });
   }
 

@@ -33,6 +33,7 @@ class FieldRequest(BaseModel):
     label: str = Field(..., max_length=512)
     field_type: str = Field("text", max_length=50)
     options: list[str] | None = None
+    validation_error: str = Field("", max_length=512)
 
 
 class AnswerFieldsRequest(BaseModel):
@@ -96,6 +97,7 @@ async def answer_fields(
             job_title=req.job_title,
             candidate=candidate,
             profile_text=profile_text,
+            validation_error=field.validation_error,
             user_id=current_user.id,
         )
         total_tokens += tokens

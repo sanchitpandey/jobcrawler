@@ -35,7 +35,8 @@
       "Bash(xargs wc:*)",
       "Bash(git check-ignore:*)",
       "Bash(npm install:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

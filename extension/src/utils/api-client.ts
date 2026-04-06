@@ -107,23 +107,73 @@ export async function login(email: string, password: string): Promise<AuthToken>
 }
 
 export async function scoreJob(request: ScoreRequest): Promise<ScoreResponse> {
-  const response = await fetchWithAuth("/score", request);
+  // Backend requires an `id` field — derive a stable short id from the URL.
+  const id = btoa(encodeURIComponent(request.url))
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 64);
+  const backendRequest = {
+    id,
+    title: request.title,
+    company: request.company,
+    description: request.description,
+    location: "",
+    is_remote: false,
+  };
+  const response = await fetchWithAuth("/jobs/score-job", backendRequest);
   if (!response.ok) {
     throw new Error(`scoreJob failed: ${response.status} ${response.statusText}`);
   }
-  return response.json() as Promise<ScoreResponse>;
+  const data = (await response.json()) as {
+    id: string;
+    fit_score: number;
+    comp_estimate: string;
+    verdict: string;
+    gaps: string[];
+    why: string;
+  };
+  // Map backend field name (comp_estimate) back to the extension type (comp_est).
+  return {
+    fit_score: data.fit_score,
+    verdict: data.verdict,
+    comp_est: data.comp_estimate ?? null,
+    gaps: data.gaps,
+  };
 }
 
 export async function answerFields(request: FillRequest): Promise<FillResponse> {
-  const response = await fetchWithAuth("/fill", request);
+  // Map extension field shape to backend FieldRequest (type → field_type).
+  const backendRequest = {
+    fields: request.fields.map((f) => ({
+      label: f.label,
+      field_type: f.type,
+      ...(f.options !== undefined ? { options: f.options } : {}),
+      ...(f.error ? { validation_error: f.error } : {}),
+    })),
+    company: request.company,
+    job_title: request.jobTitle,
+  };
+  const response = await fetchWithAuth("/forms/answer-fields", backendRequest);
   if (!response.ok) {
     throw new Error(`answerFields failed: ${response.status} ${response.statusText}`);
   }
-  return response.json() as Promise<FillResponse>;
+  // Backend returns an array; extension consumers expect a label→value map.
+  const data = (await response.json()) as {
+    answers: Array<{ label: string; value: string }>;
+  };
+  const answers: Record<string, string> = {};
+  for (const item of data.answers) {
+    answers[item.label] = item.value;
+  }
+  return { answers };
 }
 
 export async function generateCover(jobDescription: string): Promise<string> {
-  const response = await fetchWithAuth("/cover", { job_description: jobDescription });
+  const response = await fetchWithAuth("/forms/generate-cover", {
+    company: "",
+    title: "",
+    location: "",
+    description: jobDescription,
+  });
   if (!response.ok) {
     throw new Error(`generateCover failed: ${response.status} ${response.statusText}`);
   }

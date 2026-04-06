@@ -3,11 +3,14 @@ export interface ApiField {
   label: string;
   type: string;
   options?: string[];
+  id?: string;
+  error?: string;
 }
 
 export interface FillRequest {
   fields: ApiField[];
-  jobDescription: string;
+  company: string;
+  jobTitle: string;
 }
 
 export interface FillResponse {

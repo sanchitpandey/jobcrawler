@@ -36,7 +36,7 @@ Description:
 """)
 
 
-async def generate_cover(job_dict: dict, profile_text: str) -> str:
+async def generate_cover(job_dict: dict, profile_text: str) -> tuple[str, int]:
     """Generate a cover letter for a job.
 
     Parameters

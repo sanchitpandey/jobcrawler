@@ -132,6 +132,7 @@ function setInputValue(
 
 function setSelectValue(el: HTMLSelectElement, optionValue: string): void {
   _nativeSelectSetter?.call(el, optionValue);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
@@ -144,15 +145,13 @@ function fillField(modal: Element, field: ApiField, answer: string): void {
 
   switch (field.type) {
     case "select": {
-      const el =
-        (name
-          ? modal.querySelector<HTMLSelectElement>(
-              `select[name="${CSS.escape(name)}"]`
-            )
+      let el = field.id ? document.getElementById(field.id) as HTMLSelectElement : null;
+      if (!el) {
+        el = (name
+          ? modal.querySelector<HTMLSelectElement>(`select[name="${CSS.escape(name)}"]`)
           : null) ??
-        modal.querySelector<HTMLSelectElement>(
-          `select[aria-label="${CSS.escape(field.label)}"]`
-        );
+          modal.querySelector<HTMLSelectElement>(`select[aria-label="${CSS.escape(field.label)}"]`);
+      }
       if (!el) return;
 
       const optTexts = Array.from(el.options).map((o) => o.text.trim());
@@ -197,32 +196,28 @@ function fillField(modal: Element, field: ApiField, answer: string): void {
     }
 
     case "textarea": {
-      const el =
-        (name
-          ? modal.querySelector<HTMLTextAreaElement>(
-              `textarea[name="${CSS.escape(name)}"]`
-            )
+      let el = field.id ? document.getElementById(field.id) as HTMLTextAreaElement : null;
+      if (!el) {
+        el = (name
+          ? modal.querySelector<HTMLTextAreaElement>(`textarea[name="${CSS.escape(name)}"]`)
           : null) ??
-        modal.querySelector<HTMLTextAreaElement>(
-          `textarea[aria-label="${CSS.escape(field.label)}"]`
-        );
-      // Don't overwrite text the user has already typed
-      if (el && !el.value) setInputValue(el, answer);
+          modal.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${CSS.escape(field.label)}"]`);
+      }
+      // Always overwrite text for auto-filling from AI
+      if (el) setInputValue(el, answer);
       return;
     }
 
     default: {
       // text / email / number / tel / url / etc.
-      const el =
-        (name
-          ? modal.querySelector<HTMLInputElement>(
-              `input[name="${CSS.escape(name)}"]`
-            )
+      let el = field.id ? document.getElementById(field.id) as HTMLInputElement : null;
+      if (!el) {
+        el = (name
+          ? modal.querySelector<HTMLInputElement>(`input[name="${CSS.escape(name)}"]`)
           : null) ??
-        modal.querySelector<HTMLInputElement>(
-          `input[aria-label="${CSS.escape(field.label)}"]`
-        );
-      if (el && !el.value) setInputValue(el, answer);
+          modal.querySelector<HTMLInputElement>(`input[aria-label="${CSS.escape(field.label)}"]`);
+      }
+      if (el) setInputValue(el, answer);
     }
   }
 }
@@ -252,30 +247,45 @@ function sendMessage<T>(message: Message): Promise<T> {
 
 // ── Step handler ──────────────────────────────────────────────────────────────
 
-async function handleStep(modal: Element): Promise<void> {
+async function handleStep(modal: Element) {
+  console.log("[JobCrawler:linkedin] Scanning fields in modal...");
   const fields = scanFields(modal);
-  if (fields.length === 0) return;
+  console.log(`[JobCrawler:linkedin] Found ${fields.length} fields:`, fields);
+  
+  if (fields.length === 0) {
+      console.log("[JobCrawler:linkedin] No fields detected, skipping this step.");
+      return;
+  }
 
-  const jobDescription = scrapeJobDescription();
+  const title = document.querySelector(
+    "h1.t-24, h1.jobs-unified-top-card__job-title"
+  )?.textContent?.trim() ?? "";
+  const company = document.querySelector(
+    ".jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name"
+  )?.textContent?.trim() ?? "";
 
-  type FillResult = { type: "ANSWER_FIELDS_RESULT"; payload: FillResponse };
-
-  let result: FillResult;
+  let result;
   try {
-    result = await sendMessage<FillResult>({
+    console.log("[JobCrawler:linkedin] Sending ANSWER_FIELDS to background script...");
+    result = await sendMessage<any>({
       type: "ANSWER_FIELDS",
-      payload: { fields, jobDescription },
+      payload: { fields, company, jobTitle: title },
     });
-  } catch (err) {
+    console.log("[JobCrawler:linkedin] Received response from background script:", result);
+  } catch (err: unknown) {
     console.error("[JobCrawler:linkedin] ANSWER_FIELDS failed:", err);
     return;
   }
 
-  if (result?.type !== "ANSWER_FIELDS_RESULT") return;
+  if (result?.type !== "ANSWER_FIELDS_RESULT") {
+      console.log("[JobCrawler:linkedin] Background response was not a success result:", result);
+      return;
+  }
 
   const { answers } = result.payload;
+  console.log("[JobCrawler:linkedin] Using answers from backend:", answers);
+
   for (const field of fields) {
-    // API may key answers by label (human text) or by name attr — try both.
     const answer = answers[field.label] ?? answers[field.name] ?? "";
     fillField(modal, field, answer);
   }
@@ -313,7 +323,7 @@ async function scoreListing(): Promise<void> {
 // ── Modal lifecycle ───────────────────────────────────────────────────────────
 
 function handleModalFound(modal: Element): void {
-  console.debug("[JobCrawler:linkedin] Easy Apply modal detected");
+  console.log("[JobCrawler:linkedin] Easy Apply modal detected");
 
   // Fill the first step immediately
   handleStep(modal).catch((err: unknown) =>
