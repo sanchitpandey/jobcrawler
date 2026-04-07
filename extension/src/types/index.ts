@@ -13,8 +13,16 @@ export interface FillRequest {
   jobTitle: string;
 }
 
+export interface AnswerItem {
+  label: string;
+  value: string;
+  source: "pattern" | "cache" | "llm" | "manual_review";
+  confidence: number;
+  is_manual_review: boolean;
+}
+
 export interface FillResponse {
-  answers: Record<string, string>;
+  answers: AnswerItem[];
 }
 
 export interface ScoreRequest {

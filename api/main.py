@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -10,7 +12,7 @@ from starlette.responses import Response
 from api.config import get_settings
 from api.logger import get_logger, setup_logging
 from api.middleware.logging import RequestLoggingMiddleware
-from api.models.base import engine
+from api.models.base import engine, get_db
 from api.models import Base  # noqa: F401 — imports all models so metadata is populated
 from api.routes import auth, forms, jobs, profiles
 
@@ -78,5 +80,6 @@ app.include_router(profiles.router)
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
+    await db.execute(text("SELECT 1"))
+    return {"status": "ok", "db": "connected"}

@@ -9,9 +9,9 @@
 
 import { scanFields } from "../field-scanner.js";
 import { showOverlay } from "../../overlay/overlay.js";
+import { fillAllFields } from "../form-filler.js";
 import type {
-  ApiField,
-  FillResponse,
+  AnswerItem,
   Message,
   ScoreResponse,
 } from "../../types/index.js";
@@ -32,195 +32,6 @@ const JOB_DESC_SELECTORS = [
 
 // Buttons whose click must NOT trigger a fill-on-next-step cycle.
 const SUBMIT_LABELS = ["submit application", "submit"];
-
-// ── Option matching (port of form_filler._match_option) ───────────────────────
-//
-// Priority:
-//  1. Exact (case-insensitive)
-//  2. Substring (candidate ⊆ option OR option ⊆ candidate)
-//  3. Boolean shorthands (yes/true/1 ↔ yes/true; no/false/0 ↔ no/false)
-//  4. Immediate / no-notice semantic → shortest option
-
-export function matchOption(value: string, options: string[]): string | null {
-  const cand = value.toLowerCase().trim();
-
-  // 1. Exact
-  for (const opt of options) {
-    if (opt.toLowerCase() === cand) return opt;
-  }
-
-  // 2. Substring
-  for (const opt of options) {
-    const o = opt.toLowerCase();
-    if (cand.includes(o) || o.includes(cand)) return opt;
-  }
-
-  // 3. Boolean shorthands
-  if (["yes", "true", "1"].includes(cand)) {
-    for (const opt of options) {
-      if (["yes", "true"].includes(opt.toLowerCase())) return opt;
-    }
-  }
-  if (["no", "false", "0"].includes(cand)) {
-    for (const opt of options) {
-      if (["no", "false"].includes(opt.toLowerCase())) return opt;
-    }
-  }
-
-  // 4. Immediate / no-notice semantic
-  if (
-    ["immediate", "0 day", "no notice", "available now"].some((kw) =>
-      cand.includes(kw)
-    )
-  ) {
-    for (const opt of options) {
-      const o = opt.toLowerCase();
-      if (
-        ["immediate", "0", "less than 15", "< 15", "within 15"].some((kw) =>
-          o.includes(kw)
-        )
-      ) {
-        return opt;
-      }
-    }
-    // Fall back to first non-placeholder option
-    for (const opt of options) {
-      const o = opt.toLowerCase();
-      if (!["select an option", "select", "please select", ""].includes(o)) {
-        return opt;
-      }
-    }
-  }
-
-  return null;
-}
-
-// ── React-safe value setters ──────────────────────────────────────────────────
-//
-// React overrides HTMLInputElement.prototype.value via Object.defineProperty,
-// so a direct `.value = x` assignment doesn't trigger its synthetic event
-// system. We grab the native setter from the prototype and call it directly,
-// then dispatch the real DOM events that React's onChange ultimately wraps.
-
-const _nativeInputSetter = Object.getOwnPropertyDescriptor(
-  HTMLInputElement.prototype,
-  "value"
-)?.set;
-
-const _nativeTextareaSetter = Object.getOwnPropertyDescriptor(
-  HTMLTextAreaElement.prototype,
-  "value"
-)?.set;
-
-const _nativeSelectSetter = Object.getOwnPropertyDescriptor(
-  HTMLSelectElement.prototype,
-  "value"
-)?.set;
-
-function setInputValue(
-  el: HTMLInputElement | HTMLTextAreaElement,
-  value: string
-): void {
-  const setter =
-    el instanceof HTMLTextAreaElement
-      ? _nativeTextareaSetter
-      : _nativeInputSetter;
-  setter?.call(el, value);
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function setSelectValue(el: HTMLSelectElement, optionValue: string): void {
-  _nativeSelectSetter?.call(el, optionValue);
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-// ── Field filling ─────────────────────────────────────────────────────────────
-
-function fillField(modal: Element, field: ApiField, answer: string): void {
-  if (!answer) return;
-
-  const name = field.name;
-
-  switch (field.type) {
-    case "select": {
-      let el = field.id ? document.getElementById(field.id) as HTMLSelectElement : null;
-      if (!el) {
-        el = (name
-          ? modal.querySelector<HTMLSelectElement>(`select[name="${CSS.escape(name)}"]`)
-          : null) ??
-          modal.querySelector<HTMLSelectElement>(`select[aria-label="${CSS.escape(field.label)}"]`);
-      }
-      if (!el) return;
-
-      const optTexts = Array.from(el.options).map((o) => o.text.trim());
-      const matched = matchOption(answer, optTexts);
-      if (!matched) return;
-
-      const idx = optTexts.indexOf(matched);
-      const optionValue = el.options[idx]?.value ?? matched;
-      setSelectValue(el, optionValue);
-      return;
-    }
-
-    case "radio": {
-      const inputs = Array.from(
-        modal.querySelectorAll<HTMLInputElement>(
-          name
-            ? `input[type="radio"][name="${CSS.escape(name)}"]`
-            : `input[type="radio"]`
-        )
-      );
-      const values = inputs.map((el) => el.value);
-      const matched = matchOption(answer, values);
-      if (!matched) return;
-      inputs.find((el) => el.value === matched)?.click();
-      return;
-    }
-
-    case "checkbox": {
-      const inputs = Array.from(
-        modal.querySelectorAll<HTMLInputElement>(
-          name
-            ? `input[type="checkbox"][name="${CSS.escape(name)}"]`
-            : `input[type="checkbox"]`
-        )
-      );
-      const values = inputs.map((el) => el.value);
-      const matched = matchOption(answer, values);
-      if (!matched) return;
-      const target = inputs.find((el) => el.value === matched);
-      if (target && !target.checked) target.click();
-      return;
-    }
-
-    case "textarea": {
-      let el = field.id ? document.getElementById(field.id) as HTMLTextAreaElement : null;
-      if (!el) {
-        el = (name
-          ? modal.querySelector<HTMLTextAreaElement>(`textarea[name="${CSS.escape(name)}"]`)
-          : null) ??
-          modal.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${CSS.escape(field.label)}"]`);
-      }
-      // Always overwrite text for auto-filling from AI
-      if (el) setInputValue(el, answer);
-      return;
-    }
-
-    default: {
-      // text / email / number / tel / url / etc.
-      let el = field.id ? document.getElementById(field.id) as HTMLInputElement : null;
-      if (!el) {
-        el = (name
-          ? modal.querySelector<HTMLInputElement>(`input[name="${CSS.escape(name)}"]`)
-          : null) ??
-          modal.querySelector<HTMLInputElement>(`input[aria-label="${CSS.escape(field.label)}"]`);
-      }
-      if (el) setInputValue(el, answer);
-    }
-  }
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -282,12 +93,16 @@ async function handleStep(modal: Element) {
       return;
   }
 
-  const { answers } = result.payload;
+  const answers: AnswerItem[] = result.payload.answers ?? [];
   console.log("[JobCrawler:linkedin] Using answers from backend:", answers);
 
-  for (const field of fields) {
-    const answer = answers[field.label] ?? answers[field.name] ?? "";
-    fillField(modal, field, answer);
+  const fillResults = await fillAllFields(fields, answers, modal);
+  const failed = fillResults.filter((r) => !r.success);
+  if (failed.length) {
+    console.warn(
+      `[JobCrawler:linkedin] ${failed.length}/${fillResults.length} fields not filled:`,
+      failed
+    );
   }
 }
 

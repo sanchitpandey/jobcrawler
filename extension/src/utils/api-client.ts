@@ -156,15 +156,10 @@ export async function answerFields(request: FillRequest): Promise<FillResponse> 
   if (!response.ok) {
     throw new Error(`answerFields failed: ${response.status} ${response.statusText}`);
   }
-  // Backend returns an array; extension consumers expect a label→value map.
-  const data = (await response.json()) as {
-    answers: Array<{ label: string; value: string }>;
-  };
-  const answers: Record<string, string> = {};
-  for (const item of data.answers) {
-    answers[item.label] = item.value;
-  }
-  return { answers };
+  // Backend returns an array of full AnswerItem records — pass through
+  // unchanged so consumers can inspect source/confidence/manual-review flags.
+  const data = (await response.json()) as FillResponse;
+  return { answers: data.answers };
 }
 
 export async function generateCover(jobDescription: string): Promise<string> {
