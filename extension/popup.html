@@ -220,6 +220,104 @@
       min-height: 16px;
       margin-bottom: 8px;
     }
+
+    /* ── Upgrade card ────────────────────────────────────────────── */
+
+    .upgrade-card {
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .upgrade-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1e3a8a;
+      margin-bottom: 6px;
+    }
+
+    .upgrade-perks {
+      font-size: 11px;
+      color: #1e40af;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .plan-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .plan-btn {
+      flex: 1;
+      padding: 8px 6px;
+      background: #ffffff;
+      border: 1px solid #93c5fd;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #1e3a8a;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .plan-btn:hover {
+      background: #eff6ff;
+      border-color: #2563eb;
+    }
+
+    .plan-btn.selected {
+      background: #2563eb;
+      color: #ffffff;
+      border-color: #2563eb;
+    }
+
+    .plan-name {
+      font-weight: 600;
+      display: block;
+    }
+
+    .plan-price {
+      font-size: 10px;
+      opacity: 0.9;
+    }
+
+    .btn-upgrade {
+      width: 100%;
+      padding: 9px;
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-upgrade:hover { background: #1d4ed8; }
+    .btn-upgrade:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .pro-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #2563eb;
+      color: #ffffff;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    #billing-error {
+      font-size: 11px;
+      color: #dc2626;
+      min-height: 14px;
+      margin-bottom: 6px;
+    }
   </style>
 </head>
 <body>
@@ -267,6 +365,38 @@
     </div>
 
     <p id="usage-error"></p>
+
+    <!-- Upgrade card (free tier only) -->
+    <div class="upgrade-card" id="upgrade-card" style="display:none;">
+      <div class="upgrade-title">⚡ Upgrade to Pro</div>
+      <div class="upgrade-perks">
+        Unlimited applications<br />
+        Unlimited AI calls
+      </div>
+      <div class="plan-row">
+        <button class="plan-btn selected" data-plan="monthly" id="plan-monthly">
+          <span class="plan-name">Monthly</span>
+          <span class="plan-price">₹499/mo</span>
+        </button>
+        <button class="plan-btn" data-plan="annual" id="plan-annual">
+          <span class="plan-name">Annual</span>
+          <span class="plan-price">₹4,999/yr</span>
+        </button>
+      </div>
+      <p id="billing-error"></p>
+      <button id="upgrade-btn" class="btn-upgrade">Upgrade Now</button>
+    </div>
+
+    <!-- Pro status (paid tier only) -->
+    <div class="usage-card" id="pro-status-card" style="display:none;">
+      <div class="usage-label">Plan</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+        <span class="pro-badge">Pro</span>
+        <span id="pro-plan-label" style="font-size:12px;color:#374151;"></span>
+      </div>
+      <div class="usage-reset" id="pro-expires"></div>
+    </div>
+
     <button id="logout-btn" class="btn-secondary">Logout</button>
   </div>
 

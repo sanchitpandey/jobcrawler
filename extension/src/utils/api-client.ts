@@ -225,6 +225,63 @@ export interface UsageResponse {
   is_paid: boolean;
 }
 
+// ── Billing ───────────────────────────────────────────────────────────────────
+
+export type BillingPlan = "monthly" | "annual";
+
+export interface CreateOrderResponse {
+  order_id: string;
+  amount: number;
+  currency: string;
+  key_id: string;
+  plan: string;
+}
+
+export interface VerifyPaymentRequest {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+export interface VerifyPaymentResponse {
+  status: string;
+  plan: string;
+  expires_at: string;
+}
+
+export interface BillingStatusResponse {
+  tier: string;
+  plan: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+}
+
+export async function createOrder(plan: BillingPlan): Promise<CreateOrderResponse> {
+  const response = await fetchWithAuth("/billing/create-order", { plan });
+  if (!response.ok) {
+    throw new Error(`createOrder failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<CreateOrderResponse>;
+}
+
+export async function verifyPayment(
+  data: VerifyPaymentRequest,
+): Promise<VerifyPaymentResponse> {
+  const response = await fetchWithAuth("/billing/verify-payment", data);
+  if (!response.ok) {
+    throw new Error(`verifyPayment failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<VerifyPaymentResponse>;
+}
+
+export async function getBillingStatus(): Promise<BillingStatusResponse> {
+  const response = await fetchWithAuth("/billing/status", undefined, "GET");
+  if (!response.ok) {
+    throw new Error(`getBillingStatus failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<BillingStatusResponse>;
+}
+
 export async function getUsage(): Promise<UsageResponse> {
   const token = await getAuthToken();
   const headers: Record<string, string> = {};

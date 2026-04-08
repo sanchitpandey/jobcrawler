@@ -1,5 +1,7 @@
-import { getUsage } from "../utils/api-client.js";
+import { getBillingStatus, getUsage } from "../utils/api-client.js";
 import { getAuthToken } from "../utils/storage.js";
+
+type BillingPlan = "monthly" | "annual";
 
 // ── JWT decode ────────────────────────────────────────────────────────────────
 
@@ -91,6 +93,17 @@ const usageResetEl = document.querySelector<HTMLDivElement>("#usage-reset")!;
 const usageError = document.querySelector<HTMLParagraphElement>("#usage-error")!;
 const logoutBtn = document.querySelector<HTMLButtonElement>("#logout-btn")!;
 
+const upgradeCard = document.querySelector<HTMLDivElement>("#upgrade-card")!;
+const proStatusCard = document.querySelector<HTMLDivElement>("#pro-status-card")!;
+const proPlanLabel = document.querySelector<HTMLSpanElement>("#pro-plan-label")!;
+const proExpiresEl = document.querySelector<HTMLDivElement>("#pro-expires")!;
+const planMonthlyBtn = document.querySelector<HTMLButtonElement>("#plan-monthly")!;
+const planAnnualBtn = document.querySelector<HTMLButtonElement>("#plan-annual")!;
+const upgradeBtn = document.querySelector<HTMLButtonElement>("#upgrade-btn")!;
+const billingError = document.querySelector<HTMLParagraphElement>("#billing-error")!;
+
+let selectedPlan: BillingPlan = "monthly";
+
 // ── View helpers ─────────────────────────────────────────────────────────────
 
 function showLogin(): void {
@@ -139,6 +152,57 @@ async function loadUsage(): Promise<void> {
   }
 }
 
+// ── Billing display ───────────────────────────────────────────────────────────
+
+async function loadBillingStatus(): Promise<void> {
+  try {
+    const status = await getBillingStatus();
+    if (status.is_active && status.tier === "paid") {
+      upgradeCard.style.display = "none";
+      proStatusCard.style.display = "block";
+      proPlanLabel.textContent = status.plan === "annual" ? "Annual" : "Monthly";
+      if (status.expires_at) {
+        const expires = new Date(status.expires_at);
+        proExpiresEl.textContent = `Expires ${expires.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })}`;
+      }
+    } else {
+      upgradeCard.style.display = "block";
+      proStatusCard.style.display = "none";
+    }
+  } catch (err) {
+    billingError.textContent =
+      err instanceof Error ? err.message : "Could not load billing status";
+  }
+}
+
+function selectPlan(plan: BillingPlan): void {
+  selectedPlan = plan;
+  if (plan === "monthly") {
+    planMonthlyBtn.classList.add("selected");
+    planAnnualBtn.classList.remove("selected");
+  } else {
+    planAnnualBtn.classList.add("selected");
+    planMonthlyBtn.classList.remove("selected");
+  }
+}
+
+planMonthlyBtn.addEventListener("click", () => selectPlan("monthly"));
+planAnnualBtn.addEventListener("click", () => selectPlan("annual"));
+
+upgradeBtn.addEventListener("click", () => {
+  // Open the checkout page in a new tab. The Razorpay JS SDK can't run inside
+  // the popup itself due to MV3 CSP — checkout.html is a regular extension
+  // page that loads checkout.js from Razorpay's CDN.
+  const checkoutUrl = chrome.runtime.getURL(
+    `checkout.html?plan=${encodeURIComponent(selectedPlan)}`,
+  );
+  chrome.tabs.create({ url: checkoutUrl });
+});
+
 // ── Login form submit ─────────────────────────────────────────────────────────
 
 loginForm.addEventListener("submit", async (e) => {
@@ -169,6 +233,7 @@ loginForm.addEventListener("submit", async (e) => {
     await setStoredEmail(email);
     showLoggedIn(email);
     await loadUsage();
+    await loadBillingStatus();
   } catch (err) {
     loginError.textContent =
       err instanceof Error ? err.message : "Login failed. Please try again.";
@@ -197,6 +262,7 @@ async function init(): Promise<void> {
     if (typeof payload.sub === "string") {
       showLoggedIn(email);
       await loadUsage();
+      await loadBillingStatus();
       return;
     }
   }

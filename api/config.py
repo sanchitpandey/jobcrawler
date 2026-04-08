@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     free_tier_weekly_limit: int = 5
     free_tier_daily_llm_calls: int = 50   # max LLM endpoint calls/day for free users
 
+    # Razorpay (India payments)
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+
     # App
     app_env: str = "development"
     debug: bool = False

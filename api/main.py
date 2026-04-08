@@ -14,7 +14,7 @@ from api.logger import get_logger, setup_logging
 from api.middleware.logging import RequestLoggingMiddleware
 from api.models.base import engine, get_db
 from api.models import Base  # noqa: F401 — imports all models so metadata is populated
-from api.routes import auth, forms, jobs, profiles
+from api.routes import auth, billing, forms, jobs, profiles
 
 settings = get_settings()
 
@@ -74,6 +74,7 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(auth.router)
+app.include_router(billing.router)
 app.include_router(forms.router)
 app.include_router(jobs.router)
 app.include_router(profiles.router)

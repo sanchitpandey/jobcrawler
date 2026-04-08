@@ -7,6 +7,7 @@ const entryPoints = [
   { in: "src/content/orchestrator.ts", out: "content" },
   { in: "src/popup/popup.ts", out: "popup" },
   { in: "src/overlay/overlay.ts", out: "overlay" },
+  { in: "src/checkout/checkout.ts", out: "checkout" },
 ];
 
 const buildOptions = {
@@ -39,6 +40,7 @@ const resolvedOptions = {
     content: "src/content/orchestrator.ts",
     popup: "src/popup/popup.ts",
     overlay: "src/overlay/overlay.ts",
+    checkout: "src/checkout/checkout.ts",
   },
 };
 

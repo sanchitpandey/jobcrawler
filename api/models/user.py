@@ -10,6 +10,7 @@ from api.models.base import Base
 if TYPE_CHECKING:
     from api.models.application import Application
     from api.models.profile import Profile
+    from api.models.subscription import Subscription
 
 
 class User(Base):
@@ -44,6 +45,9 @@ class User(Base):
     )
     applications: Mapped[list["Application"]] = relationship(
         "Application", back_populates="user", cascade="all, delete-orphan"
+    )
+    subscriptions: Mapped[list["Subscription"]] = relationship(
+        "Subscription", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
