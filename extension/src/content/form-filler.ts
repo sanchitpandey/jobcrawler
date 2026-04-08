@@ -25,8 +25,8 @@ export interface FillResult {
 // ── cssEscape polyfill (jsdom doesn't ship it) ───────────────────────────────
 
 const cssEscape: (s: string) => string =
-  typeof CSS !== "undefined" && typeof cssEscape === "function"
-    ? cssEscape.bind(CSS)
+  typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape.bind(CSS)
     : (s: string) => s.replace(/["\\]/g, "\\$&");
 
 // ── React-safe native setters ─────────────────────────────────────────────────

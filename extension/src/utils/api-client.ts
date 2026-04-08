@@ -5,6 +5,9 @@ import type {
   FillResponse,
   ScoreRequest,
   ScoreResponse,
+  TrackJobPayload,
+  TrackJobResponse,
+  UpdateStatusPayload,
 } from "../types/index.js";
 
 export const API_BASE = "http://localhost:8000";
@@ -59,7 +62,11 @@ async function doRefresh(refreshToken: string): Promise<AuthToken> {
 
 // ── Authenticated fetch ───────────────────────────────────────────────────────
 
-async function fetchWithAuth(path: string, body: unknown): Promise<Response> {
+async function fetchWithAuth(
+  path: string,
+  body: unknown,
+  method: "POST" | "PATCH" | "GET" = "POST",
+): Promise<Response> {
   let token = await getAuthToken();
 
   if (token && isExpired(token.access_token)) {
@@ -77,9 +84,9 @@ async function fetchWithAuth(path: string, body: unknown): Promise<Response> {
   }
 
   return fetch(`${API_BASE}${path}`, {
-    method: "POST",
+    method,
     headers,
-    body: JSON.stringify(body),
+    body: method === "GET" ? undefined : JSON.stringify(body),
   });
 }
 
@@ -174,6 +181,41 @@ export async function generateCover(jobDescription: string): Promise<string> {
   }
   const data = (await response.json()) as { cover_letter: string };
   return data.cover_letter;
+}
+
+export async function trackJob(payload: TrackJobPayload): Promise<TrackJobResponse> {
+  const body = {
+    company: payload.company,
+    title: payload.title,
+    location: payload.location,
+    url: payload.url,
+    description: payload.description,
+    ats_type: payload.ats_type,
+    difficulty: payload.difficulty,
+    fit_score: payload.fit_score,
+    comp_est: payload.comp_est,
+    verdict: payload.verdict,
+    gaps: payload.gaps,
+  };
+  const response = await fetchWithAuth("/jobs", body);
+  if (!response.ok) {
+    throw new Error(`trackJob failed: ${response.status} ${response.statusText}`);
+  }
+  const data = (await response.json()) as { id: string };
+  return { app_id: data.id };
+}
+
+export async function updateStatus(payload: UpdateStatusPayload): Promise<{ ok: boolean }> {
+  const body = {
+    status: payload.status,
+    filled_fields_json: payload.filled_fields_json,
+    cover_letter: payload.cover_letter,
+  };
+  const response = await fetchWithAuth(`/jobs/${encodeURIComponent(payload.app_id)}/status`, body, "PATCH");
+  if (!response.ok) {
+    throw new Error(`updateStatus failed: ${response.status} ${response.statusText}`);
+  }
+  return { ok: true };
 }
 
 export interface UsageResponse {

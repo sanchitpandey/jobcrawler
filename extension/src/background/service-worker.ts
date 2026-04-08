@@ -1,5 +1,12 @@
 import { getAuthToken, setAuthToken, clearAuthToken } from "../utils/storage.js";
-import { login, scoreJob, answerFields, generateCover } from "../utils/api-client.js";
+import {
+  login,
+  scoreJob,
+  answerFields,
+  generateCover,
+  trackJob,
+  updateStatus,
+} from "../utils/api-client.js";
 import type { Message } from "../types/index.js";
 
 // ── First-install hook ────────────────────────────────────────────────────────
@@ -47,6 +54,16 @@ async function handleMessage(message: Message): Promise<unknown> {
     case "GENERATE_COVER": {
       const cover_letter = await generateCover(message.payload.jobDescription);
       return { type: "GENERATE_COVER_RESULT", payload: { cover_letter } };
+    }
+
+    case "TRACK_JOB": {
+      const result = await trackJob(message.payload);
+      return { type: "TRACK_JOB_RESULT", payload: result };
+    }
+
+    case "UPDATE_STATUS": {
+      const result = await updateStatus(message.payload);
+      return { type: "UPDATE_STATUS_RESULT", payload: result };
     }
 
     case "GET_AUTH_TOKEN":

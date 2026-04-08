@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>JobCrawler Overlay — Visual Test</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        margin: 0;
+        padding: 40px;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      h1 { font-size: 20px; margin-top: 0; }
+      .controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+      button {
+        padding: 10px 16px;
+        background: #2563eb;
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #fff;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+      }
+      pre {
+        background: #fff;
+        padding: 12px 16px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        font-size: 12px;
+        max-height: 300px;
+        overflow: auto;
+      }
+      .hostile-zone {
+        margin-top: 24px;
+        padding: 16px;
+        border: 1px dashed #cbd5e1;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .hostile-zone .jc-btn-submit { background: red !important; }
+      .hostile-zone button { background: hotpink !important; }
+    </style>
+  </head>
+  <body>
+    <h1>JobCrawler Overlay — Visual Test</h1>
+    <p>
+      Renders the overlay with mock data. Click buttons to trigger different
+      states. Open the page directly in a browser after running
+      <code>npm run build</code>.
+    </p>
+
+    <div class="controls">
+      <button id="badge-good">Score badge: 87 (good)</button>
+      <button id="badge-ok">Score badge: 55 (ok)</button>
+      <button id="badge-poor">Score badge: 30 (poor)</button>
+      <button id="panel-small">Review panel: 3 fields</button>
+      <button id="panel-large">Review panel: 8 fields (mixed)</button>
+      <button id="panel-review">Review panel: needs review</button>
+      <button class="secondary" id="clear">Clear overlay</button>
+    </div>
+
+    <h3>Last result</h3>
+    <pre id="result">(none)</pre>
+
+    <div class="hostile-zone">
+      <strong>Hostile CSS zone:</strong> Generic <code>button</code> selectors
+      in this page try to set background to <em>hotpink</em>. The overlay must
+      not be affected.
+      <button>I am a hostile button</button>
+    </div>
+
+    <script type="module">
+      import {
+        showScoreBadge,
+        showReviewPanel,
+        removeOverlay,
+      } from "../dist/overlay.js";
+
+      const result = document.getElementById("result");
+      const log = (label, data) => {
+        result.textContent = label + "\n" + JSON.stringify(data, null, 2);
+      };
+
+      const jobInfo = {
+        title: "Senior ML Engineer",
+        company: "Google",
+        location: "Bengaluru, India",
+        score: 87,
+        verdict: "strong_yes",
+      };
+
+      const sampleField = (label, type = "text") => ({
+        name: label.toLowerCase().replace(/\s+/g, "_"),
+        label,
+        type,
+      });
+      const sampleAnswer = (label, value, src = "pattern", conf = 1, review = false) => ({
+        label,
+        value,
+        source: src,
+        confidence: conf,
+        is_manual_review: review,
+      });
+
+      document.getElementById("badge-good").onclick = () =>
+        showScoreBadge({
+          fit_score: 87,
+          verdict: "strong_yes",
+          comp_est: "₹40-60 LPA",
+          gaps: ["No Kubernetes experience", "Limited Rust"],
+        });
+
+      document.getElementById("badge-ok").onclick = () =>
+        showScoreBadge({
+          fit_score: 55,
+          verdict: "maybe",
+          comp_est: "₹25-35 LPA",
+          gaps: ["No production LLM experience"],
+        });
+
+      document.getElementById("badge-poor").onclick = () =>
+        showScoreBadge({
+          fit_score: 30,
+          verdict: "no",
+          comp_est: null,
+          gaps: ["No frontend experience", "Wrong tech stack"],
+        });
+
+      document.getElementById("panel-small").onclick = async () => {
+        const fields = [
+          sampleField("Email"),
+          sampleField("Phone"),
+          sampleField("Years of Python"),
+        ];
+        const answers = [
+          sampleAnswer("Email", "sanchitpandey72@gmail.com"),
+          sampleAnswer("Phone", "+91 99999 88888"),
+          sampleAnswer("Years of Python", "3"),
+        ];
+        log("submitted", await showReviewPanel(jobInfo, fields, answers));
+      };
+
+      document.getElementById("panel-large").onclick = async () => {
+        const fields = [
+          sampleField("Email"),
+          sampleField("Phone"),
+          sampleField("Years of Python"),
+          sampleField("Years of TensorFlow"),
+          sampleField("Authorized to work in India"),
+          sampleField("Notice period (days)"),
+          sampleField("Why are you a good fit?", "textarea"),
+          sampleField("Describe a challenging project", "textarea"),
+        ];
+        const answers = [
+          sampleAnswer("Email", "sanchitpandey72@gmail.com"),
+          sampleAnswer("Phone", "+91 99999 88888"),
+          sampleAnswer("Years of Python", "3"),
+          sampleAnswer("Years of TensorFlow", "2"),
+          sampleAnswer("Authorized to work in India", "Yes"),
+          sampleAnswer("Notice period (days)", "30"),
+          sampleAnswer(
+            "Why are you a good fit?",
+            "My RAG utilization research directly aligns with your retrieval infrastructure work at scale.",
+            "llm",
+            0.87,
+          ),
+          sampleAnswer("Describe a challenging project", "", "manual_review", 0, true),
+        ];
+        log("submitted", await showReviewPanel(jobInfo, fields, answers));
+      };
+
+      document.getElementById("panel-review").onclick = async () => {
+        const fields = [
+          sampleField("Why this company?", "textarea"),
+          sampleField("Salary expectations"),
+        ];
+        const answers = [
+          sampleAnswer("Why this company?", "", "manual_review", 0, true),
+          sampleAnswer("Salary expectations", "", "manual_review", 0, true),
+        ];
+        log("submitted", await showReviewPanel(jobInfo, fields, answers));
+      };
+
+      document.getElementById("clear").onclick = () => {
+        removeOverlay();
+        result.textContent = "(cleared)";
+      };
+    </script>
+  </body>
+</html>

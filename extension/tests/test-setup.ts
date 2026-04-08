@@ -3,6 +3,16 @@
  * Tests run under jsdom (configured in vitest.config.ts).
  */
 
+// jsdom doesn't expose CSS.escape — polyfill it for selector building.
+if (typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS === "undefined") {
+  (globalThis as { CSS: { escape: (s: string) => string } }).CSS = {
+    escape: (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`),
+  };
+} else if (typeof (globalThis as { CSS: { escape?: (s: string) => string } }).CSS.escape !== "function") {
+  (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape = (s: string) =>
+    s.replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
+}
+
 export function createMockInput(
   type: string = "text",
   id?: string
