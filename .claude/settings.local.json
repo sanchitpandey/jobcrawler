@@ -37,7 +37,9 @@
       "Bash(npm install:*)",
       "Bash(npm run:*)",
       "Bash(npx tsc:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(claude skill:*)",
+      "Bash(claude install:*)"
     ]
   }
 }

@@ -1,0 +1,39 @@
+JobCrawler — AI Job Application Automation
+
+Apply to LinkedIn jobs 10x faster. JobCrawler fills your Easy Apply forms with
+AI-powered answers based on your profile, then lets you review every answer
+before submitting.
+
+✅ Smart Form Filling — AI generates answers from your profile
+✅ Review Before Submit — Edit any answer before applying
+✅ Fit Score — See how well you match each job
+✅ Privacy First — We never store your LinkedIn password
+✅ Free to Start — 5 applications per week, no credit card required
+
+HOW IT WORKS:
+1. Install JobCrawler and create your profile (takes ~5 minutes)
+2. Browse LinkedIn jobs normally — see AI fit scores on each listing
+3. Click Easy Apply — JobCrawler fills every form field with AI answers
+4. Review every answer in the overlay, edit anything you want, then submit
+
+FEATURES:
+• Multi-step Easy Apply support — works across all modal steps
+• Dropdown, radio button, checkbox, text field, and date field support
+• Cover letter generation from your profile and the job description
+• Application history tracking with status updates
+• Confidence scoring per answer — flagged answers are highlighted for review
+
+PRICING:
+Free: 5 applications/week, AI scoring, AI form filling
+Pro (₹499/month): Unlimited applications, unlimited AI, priority support
+
+PRIVACY:
+JobCrawler runs entirely in your browser. We never access your LinkedIn
+password, session cookies, or credentials. Your profile data is encrypted
+in transit and at rest. The extension only activates on linkedin.com/jobs/*
+pages and has no access to your broader browsing history.
+
+COMING SOON:
+• Greenhouse support
+• Lever support
+• Indeed support

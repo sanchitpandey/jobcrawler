@@ -2,32 +2,8 @@ const esbuild = require("esbuild");
 
 const watch = process.argv.includes("--watch");
 
-const entryPoints = [
-  { in: "src/background/service-worker.ts", out: "service-worker" },
-  { in: "src/content/orchestrator.ts", out: "content" },
-  { in: "src/popup/popup.ts", out: "popup" },
-  { in: "src/overlay/overlay.ts", out: "overlay" },
-  { in: "src/checkout/checkout.ts", out: "checkout" },
-];
-
-const buildOptions = {
-  entryPoints: entryPoints.map((e) => e.in),
-  bundle: true,
-  outdir: "dist",
-  outExtension: { ".js": ".js" },
-  entryNames: (entry) => {
-    const match = entryPoints.find((e) => e.in === entry.relativePath);
-    return match ? match.out : "[name]";
-  },
-  platform: "browser",
-  target: "es2020",
-  format: "esm",
-  sourcemap: true,
-  logLevel: "info",
-};
-
-// Resolve entry → output name mapping manually
-const resolvedOptions = {
+// ESM — service worker and popup-context scripts (need module semantics)
+const esmOptions = {
   bundle: true,
   outdir: "dist",
   platform: "browser",
@@ -37,18 +13,46 @@ const resolvedOptions = {
   logLevel: "info",
   entryPoints: {
     "service-worker": "src/background/service-worker.ts",
-    content: "src/content/orchestrator.ts",
     popup: "src/popup/popup.ts",
     overlay: "src/overlay/overlay.ts",
     checkout: "src/checkout/checkout.ts",
   },
+  define: {
+    API_BASE_URL: JSON.stringify(
+      process.env.API_URL || "http://localhost:8000"
+    ),
+  },
+};
+
+// IIFE — content scripts injected as classic scripts (no top-level export allowed)
+const iifeOptions = {
+  bundle: true,
+  outdir: "dist",
+  platform: "browser",
+  target: "es2020",
+  format: "iife",
+  sourcemap: true,
+  logLevel: "info",
+  entryPoints: {
+    content: "src/content/orchestrator.ts",
+    "content/discovery-scraper": "src/content/discovery-scraper.ts",
+    "content/job-page-scraper": "src/content/job-page-scraper.ts",
+  },
+  define: {
+    API_BASE_URL: JSON.stringify(
+      process.env.API_URL || "http://localhost:8000"
+    ),
+  },
 };
 
 if (watch) {
-  esbuild.context(resolvedOptions).then((ctx) => {
-    ctx.watch();
-    console.log("Watching for changes...");
-  });
+  Promise.all([
+    esbuild.context(esmOptions).then((ctx) => ctx.watch()),
+    esbuild.context(iifeOptions).then((ctx) => ctx.watch()),
+  ]).then(() => console.log("Watching for changes..."));
 } else {
-  esbuild.build(resolvedOptions).catch(() => process.exit(1));
+  Promise.all([
+    esbuild.build(esmOptions),
+    esbuild.build(iifeOptions),
+  ]).catch(() => process.exit(1));
 }

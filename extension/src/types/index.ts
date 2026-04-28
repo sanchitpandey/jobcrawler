@@ -1,3 +1,34 @@
+export interface DiscoveryConfig {
+  keywords: string[];
+  location: string;
+  experienceLevels: string; // e.g. "2,3"
+  remoteFilter: string;     // "" | "2" | "3"
+  timeRange: string;        // e.g. "r86400"
+}
+
+export interface RawJob {
+  linkedin_job_id: string;
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+  posted_text: string;
+  is_easy_apply: boolean;
+  applicant_count: string;
+}
+
+export interface DiscoveryStatus {
+  phase: "discovering" | "filtering" | "enriching" | "scoring" | "complete" | "idle" | "error";
+  progress?: number;
+  total?: number;
+  discovered?: number;
+  filtered?: number;
+  scored?: number;
+  approved?: number;
+  needsReview?: number;
+  error?: string;
+}
+
 export interface ApiField {
   name: string;
   label: string;
@@ -62,6 +93,27 @@ export interface TrackJobResponse {
   app_id: string;
 }
 
+export interface QueueItem {
+  id: string;
+  url: string;
+  company: string;
+  title: string;
+  fit_score: number;
+  ats_type: string;
+}
+
+export interface AutoApplyStatus {
+  phase: "applying" | "paused" | "complete" | "stopped";
+  current?: number;
+  total?: number;
+  applied?: number;
+  skipped?: number;
+  failed?: number;
+  currentJob?: { company: string; title: string; score: number };
+  stopReason?: string;
+  lastError?: string;
+}
+
 export interface UpdateStatusPayload {
   app_id: string;
   status: string;
@@ -88,6 +140,18 @@ export type Message =
   | { type: "GET_AUTH_TOKEN" }
   | { type: "AUTH_TOKEN_RESULT"; payload: AuthToken | null }
   | { type: "CLEAR_AUTH_TOKEN" }
+  // Discovery flow messages
+  | { type: "start_discovery"; payload: DiscoveryConfig }
+  | { type: "stop_discovery" }
+  | { type: "discovery_page_complete"; jobs: RawJob[]; searchUrl: string; rateLimited?: boolean }
+  | { type: "discovery_progress"; count: number }
+  | { type: "discovery_status"; phase: DiscoveryStatus["phase"]; progress?: number; total?: number; discovered?: number; filtered?: number; scored?: number; approved?: number; needsReview?: number; error?: string }
+  // Auto-apply flow messages
+  | { type: "start_auto_apply"; payload?: { maxJobs?: number } }
+  | { type: "stop_auto_apply" }
+  | { type: "auto_apply_progress"; phase: AutoApplyStatus["phase"]; current?: number; total?: number; applied?: number; skipped?: number; failed?: number; currentJob?: { company: string; title: string; score: number }; stopReason?: string; lastError?: string }
+  | { type: "batch_job_complete"; success: boolean; skipped?: boolean; filledFields?: Record<string, string> }
+  | { type: "batch_job_failed"; error: string }
   | { type: "ERROR"; payload: { message: string } };
 
 export type MessageType = Message["type"];

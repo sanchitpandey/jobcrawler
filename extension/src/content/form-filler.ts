@@ -358,6 +358,37 @@ function locateElement(field: ApiField, root: ParentNode): Element | null {
     if (byAria) return byAria;
   }
 
+  // Last-resort: walk <label>/<legend> text to find the associated element.
+  // LinkedIn's React can reassign or strip element attributes between scan and
+  // fill; matching by visible label text is more resilient.
+  if (label && root instanceof Element) {
+    const normLabel = label.toLowerCase().replace(/\s+/g, " ").trim();
+    for (const lbl of root.querySelectorAll<HTMLElement>("label, legend")) {
+      const text = (lbl.textContent ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+      if (!text.includes(normLabel) && !normLabel.includes(text)) continue;
+
+      // Follow <label for="..."> association.
+      const forId = lbl.getAttribute("for");
+      if (forId) {
+        const assoc = document.getElementById(forId);
+        if (assoc && assoc.matches(tag)) return assoc;
+      }
+
+      // Search the nearest form-element container for a matching tag.
+      const container =
+        lbl.closest(".fb-dash-form-element") ??
+        lbl.closest(".jobs-easy-apply-form-section__grouping") ??
+        lbl.closest(".artdeco-text-input") ??
+        lbl.parentElement;
+      if (container) {
+        const el = container.querySelector(
+          `${tag}:not([type="hidden"]):not([type="radio"]):not([type="checkbox"])`,
+        );
+        if (el) return el;
+      }
+    }
+  }
+
   return null;
 }
 

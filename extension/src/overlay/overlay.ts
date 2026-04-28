@@ -53,6 +53,8 @@ function escapeHtml(s: string): string {
 
 const OVERLAY_CSS = `
 :host, * { box-sizing: border-box; }
+/* Re-enable pointer events on all shadow content (host is pointer-events:none). */
+.jc-root, .jc-root * { pointer-events: auto; }
 
 .jc-root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -251,9 +253,25 @@ function createOverlayHost(id: string = HOST_ID): ShadowRoot {
 
   const host = document.createElement("div");
   host.id = id;
-  // `all: initial` resets host-page CSS inheritance into our host node.
-  host.style.cssText =
-    "all: initial; position: fixed; top: 0; right: 0; z-index: 2147483647;";
+
+  // The review panel host must cover the full viewport so hit-testing works
+  // for both the full-screen backdrop and the 420px panel. The badge host
+  // only needs to sit in the top-right corner.
+  const isPanel = id === HOST_ID;
+  host.style.cssText = isPanel
+    ? "all: initial; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none;"
+    : "all: initial; position: fixed; top: 0; right: 0; z-index: 2147483647;";
+
+  // LinkedIn's Easy Apply modal implements a focus trap: it listens for
+  // mousedown/click at the document level and refocuses the modal whenever a
+  // click lands on an element outside it.  Our shadow host IS outside the
+  // modal in the light DOM, so LinkedIn would intercept every click before our
+  // shadow-DOM inputs can receive focus.  Stopping propagation at the host
+  // boundary lets our inputs work while keeping LinkedIn's handlers in the dark.
+  for (const type of ["mousedown", "click", "keydown"] as const) {
+    host.addEventListener(type, (e) => e.stopPropagation(), false);
+  }
+
   document.body.appendChild(host);
 
   // `open` mode lets tests inspect the shadow root via host.shadowRoot.
@@ -410,8 +428,10 @@ export function showReviewPanel(
     const root = shadow.querySelector(".jc-root") as HTMLElement;
 
     // Pair fields with answers by label (answers may be in different order).
+    // Defensive: coerce to array in case the API response was malformed.
+    const safeAnswers: AnswerItem[] = Array.isArray(answers) ? answers : [];
     const answerByLabel = new Map<string, AnswerItem>();
-    for (const a of answers) answerByLabel.set(a.label, a);
+    for (const a of safeAnswers) answerByLabel.set(a.label, a);
 
     const score = jobInfo.score;
     const scoreBucket =
@@ -427,7 +447,7 @@ export function showReviewPanel(
       .map((f, i) => renderField(f, answerByLabel.get(f.label), i))
       .join("");
 
-    const summary = buildSummary(answers);
+    const summary = buildSummary(safeAnswers);
 
     const jobLine = [jobInfo.company, jobInfo.title, jobInfo.location]
       .filter(Boolean)
@@ -512,6 +532,12 @@ export function showReviewPanel(
 }
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
+
+/** Remove only the review panel, leaving the score badge visible. */
+export function removePanel(): void {
+  document.getElementById(HOST_ID)?.remove();
+  _activeShadow = null;
+}
 
 /** Remove all overlay elements (panel + badge) from the page. */
 export function removeOverlay(): void {

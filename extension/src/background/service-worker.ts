@@ -7,11 +7,30 @@ import {
   trackJob,
   updateStatus,
 } from "../utils/api-client.js";
+import { discoveryOrchestrator } from "./discovery-orchestrator.js";
+import { autoApplyOrchestrator } from "./auto-apply-orchestrator.js";
 import type { Message } from "../types/index.js";
 
-// ── First-install hook ────────────────────────────────────────────────────────
+// ── Service-worker keepalive (MV3 workers die after ~5 min idle) ──────────────
+
+chrome.alarms.onAlarm.addListener((_alarm) => {
+  // No-op: receiving the alarm event is enough to keep the worker alive.
+});
+
+// ── Startup / install cleanup ─────────────────────────────────────────────────
+// Clear any flags that may have been left behind if the browser was closed
+// mid-session (e.g. batchMode=true while applying, or a stale discoveryStatus).
+
+function clearStaleSessionFlags(): void {
+  chrome.storage.local
+    .set({ batchMode: false, currentJobId: null })
+    .catch(() => undefined);
+}
+
+chrome.runtime.onStartup.addListener(clearStaleSessionFlags);
 
 chrome.runtime.onInstalled.addListener((details) => {
+  clearStaleSessionFlags();
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
     // openPopup() requires a user gesture in some Chrome builds; suppress error.
     chrome.action.openPopup().catch(() => undefined);
@@ -21,8 +40,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 // ── Message bus ───────────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
-  (message: Message, _sender, sendResponse) => {
-    handleMessage(message)
+  (message: Message, sender, sendResponse) => {
+    handleMessage(message, sender)
       .then(sendResponse)
       .catch((err: unknown) => {
         sendResponse({ type: "ERROR", payload: { message: String(err) } });
@@ -31,7 +50,7 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
-async function handleMessage(message: Message): Promise<unknown> {
+async function handleMessage(message: Message, sender?: chrome.runtime.MessageSender): Promise<unknown> {
   switch (message.type) {
     case "LOGIN": {
       const token = await login(message.payload.email, message.payload.password);
@@ -72,6 +91,42 @@ async function handleMessage(message: Message): Promise<unknown> {
     case "CLEAR_AUTH_TOKEN":
       await clearAuthToken();
       return { type: "AUTH_TOKEN_RESULT", payload: null };
+
+    case "start_discovery":
+      // Fire-and-forget: the orchestrator sends progress updates independently.
+      discoveryOrchestrator.start(message.payload).catch(() => undefined);
+      return { ok: true };
+
+    case "stop_discovery":
+      discoveryOrchestrator.stop();
+      return { ok: true };
+
+    // discovery_page_complete is handled internally by the orchestrator's
+    // own onMessage listener inside runDiscoveryScrape(). Acknowledge here
+    // so callers don't receive an "unknown message type" error.
+    case "discovery_page_complete":
+    case "discovery_progress":
+      return { ok: true };
+
+    case "start_auto_apply":
+      autoApplyOrchestrator.start(message.payload?.maxJobs).catch(() => undefined);
+      return { ok: true };
+
+    case "stop_auto_apply":
+      autoApplyOrchestrator.stop();
+      return { ok: true };
+
+    case "batch_job_complete":
+      autoApplyOrchestrator.handleBatchJobComplete(message, sender?.tab?.id ?? -1);
+      return { ok: true };
+
+    case "batch_job_failed":
+      autoApplyOrchestrator.handleBatchJobFailed(message.error, sender?.tab?.id ?? -1);
+      return { ok: true };
+
+    // auto_apply_progress is broadcast outward to popup; acknowledge if received.
+    case "auto_apply_progress":
+      return { ok: true };
 
     default:
       return { type: "ERROR", payload: { message: "Unknown message type" } };

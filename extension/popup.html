@@ -4,401 +4,513 @@
   <meta charset="UTF-8" />
   <title>JobCrawler</title>
   <style>
+    :root {
+      --blue:       #2563eb;
+      --blue-h:     #1d4ed8;
+      --blue-lt:    #eff6ff;
+      --blue-bd:    #bfdbfe;
+      --text:       #0f172a;
+      --muted:      #64748b;
+      --xmuted:     #94a3b8;
+      --border:     #e2e8f0;
+      --surface:    #f8fafc;
+      --white:      #ffffff;
+      --green:      #16a34a;
+      --amber:      #d97706;
+      --red:        #dc2626;
+      --red-lt:     #fef2f2;
+      --red-bd:     #fca5a5;
+      --mono:       'SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       width: 320px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #ffffff;
-      color: #1a1a1a;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 16px 20px 12px;
-      border-bottom: 1px solid #e5e7eb;
-    }
-
-    .header-logo {
-      width: 20px;
-      height: 20px;
-      background: #2563eb;
-      border-radius: 4px;
-    }
-
-    .header h1 {
-      font-size: 15px;
-      font-weight: 600;
-      color: #111827;
-      letter-spacing: -0.01em;
-    }
-
-    /* ── Login view ─────────────────────────────────────────────── */
-
-    #login-view {
-      padding: 20px;
-    }
-
-    #login-view p.subtitle {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
       font-size: 13px;
-      color: #6b7280;
-      margin-bottom: 16px;
+      background: var(--white);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
     }
 
-    .field {
-      margin-bottom: 12px;
+    /* ── HEADER ─────────────────────────────────────────── */
+    .hd {
+      display: flex; align-items: center; gap: 9px;
+      padding: 11px 15px 10px;
+      border-bottom: 1.5px solid var(--border);
+      position: relative;
     }
-
-    .field label {
-      display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: #374151;
-      margin-bottom: 4px;
+    .hd::after {
+      content: ''; position: absolute;
+      bottom: -1.5px; left: 0;
+      width: 48px; height: 1.5px;
+      background: var(--blue);
     }
-
-    .field input {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      font-size: 13px;
-      color: #111827;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-
-    .field input:focus {
-      border-color: #2563eb;
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
-    }
-
-    #login-error {
-      font-size: 12px;
-      color: #dc2626;
-      min-height: 16px;
-      margin-bottom: 12px;
-    }
-
-    .btn-primary {
-      width: 100%;
-      padding: 9px;
-      background: #2563eb;
-      color: #ffffff;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-
-    .btn-primary:hover { background: #1d4ed8; }
-    .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
-
-    /* ── Logged-in view ─────────────────────────────────────────── */
-
-    #loggedin-view {
-      padding: 20px;
-      display: none;
-    }
-
-    .user-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .avatar {
-      width: 34px;
-      height: 34px;
-      background: #dbeafe;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      font-weight: 600;
-      color: #2563eb;
+    .logo {
+      width: 20px; height: 20px;
+      background: var(--blue); border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
     }
-
-    .user-info {
-      min-width: 0;
+    .logo-arrow {
+      width: 0; height: 0;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      border-left: 8px solid white;
+      margin-left: 2px;
+    }
+    .hd-title { font-size: 14px; font-weight: 700; letter-spacing: -.01em; flex: 1; }
+    .hd-badge {
+      font-size: 9px; font-weight: 700;
+      color: var(--xmuted); letter-spacing: .08em; text-transform: uppercase;
     }
 
-    .user-email {
-      font-size: 13px;
-      font-weight: 500;
-      color: #111827;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    /* ── VIEWS & PANELS ─────────────────────────────────── */
+    .view { display: none; }
+    .view.on { display: block; }
+    .panel { display: none; padding: 14px 15px; }
+    .panel.on { display: block; animation: fadein .14s ease; }
+    .panel-s { max-height: 385px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+    @keyframes fadein {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: none; }
     }
 
-    .user-tier {
-      font-size: 11px;
-      color: #6b7280;
-      margin-top: 1px;
+    /* ── USER STRIP ─────────────────────────────────────── */
+    .usr {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 15px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
     }
-
-    .usage-card {
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 12px 14px;
-      margin-bottom: 16px;
+    .avt {
+      width: 22px; height: 22px;
+      background: var(--blue-lt); border: 1px solid var(--blue-bd);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 800; color: var(--blue);
+      font-family: var(--mono); flex-shrink: 0;
     }
-
-    .usage-label {
-      font-size: 11px;
-      font-weight: 500;
-      color: #6b7280;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 6px;
+    #user-email-display {
+      flex: 1; font-size: 11px; color: var(--muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-
-    .usage-count {
-      font-size: 22px;
-      font-weight: 700;
-      color: #111827;
-      line-height: 1;
+    #user-tier-display { font-size: 10px; color: var(--xmuted); font-family: var(--mono); flex-shrink: 0; }
+    .icon-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--xmuted); font-size: 13px; padding: 2px 4px;
+      border-radius: 3px; line-height: 1; transition: color .1s, background .1s;
     }
+    .icon-btn:hover { color: var(--text); background: var(--border); }
 
-    .usage-count span {
-      font-size: 13px;
-      font-weight: 400;
-      color: #6b7280;
+    /* ── FORMS ──────────────────────────────────────────── */
+    .f { margin-bottom: 10px; }
+    .lbl {
+      display: block; font-size: 10px; font-weight: 700;
+      color: var(--muted); letter-spacing: .05em; text-transform: uppercase;
+      margin-bottom: 4px;
     }
-
-    .usage-bar-track {
-      margin-top: 8px;
-      height: 4px;
-      background: #e5e7eb;
-      border-radius: 2px;
-      overflow: hidden;
+    input[type=text], input[type=email], input[type=password],
+    select, textarea {
+      width: 100%; padding: 7px 9px;
+      border: 1px solid var(--border); border-radius: 5px;
+      font-size: 12px; color: var(--text); background: var(--white);
+      outline: none; transition: border-color .12s, box-shadow .12s;
+      font-family: inherit; resize: none;
     }
-
-    .usage-bar-fill {
-      height: 100%;
-      background: #2563eb;
-      border-radius: 2px;
-      transition: width 0.3s;
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.1);
     }
+    .f-inline { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+    .f-inline input[type=checkbox] { width: 14px; height: 14px; accent-color: var(--blue); cursor: pointer; }
+    .f-inline label { font-size: 12px; color: var(--text); cursor: pointer; }
+    .sl-wrap { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    input[type=range] { flex: 1; height: 4px; accent-color: var(--blue); cursor: pointer; padding: 0; border: none; box-shadow: none; }
+    .sl-val { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--blue); min-width: 24px; text-align: right; }
 
-    .usage-reset {
-      font-size: 11px;
-      color: #9ca3af;
-      margin-top: 6px;
+    /* ── BUTTONS ────────────────────────────────────────── */
+    .btn {
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      width: 100%; padding: 8px 12px;
+      border: none; border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: background .12s, transform .06s; font-family: inherit;
     }
+    .btn:active:not(:disabled) { transform: scale(.98); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; transform: none !important; }
 
-    .btn-secondary {
-      width: 100%;
-      padding: 8px;
-      background: #ffffff;
-      color: #374151;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
+    .btn-p  { background: var(--blue); color: white; }
+    .btn-p:hover:not(:disabled) { background: var(--blue-h); }
+
+    .btn-g  { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-g:hover:not(:disabled) { background: var(--border); }
+
+    .btn-d  { background: var(--red-lt); color: var(--red); border: 1px solid var(--red-bd); }
+    .btn-d:hover:not(:disabled) { background: #fee2e2; }
+
+    .btn-sm { padding: 6px 10px; font-size: 11px; }
+    .btn-row { display: flex; gap: 7px; }
+    .btn-row > * { flex: 1; }
+
+    /* ── ERRORS ─────────────────────────────────────────── */
+    .err { font-size: 11px; color: var(--red); min-height: 14px; margin-bottom: 6px; }
+
+    /* ── STAT GRID ──────────────────────────────────────── */
+    .sg { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin-bottom: 12px; }
+    .sb { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 9px 7px; text-align: center; }
+    .sn { font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+    .sl { font-size: 9px; color: var(--xmuted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-top: 3px; }
+
+    /* ── PROGRESS BAR ───────────────────────────────────── */
+    .pt { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 8px 0; }
+    .pf { height: 100%; background: var(--blue); border-radius: 2px; transition: width .4s cubic-bezier(.4,0,.2,1); position: relative; overflow: hidden; }
+    .pf::after {
+      content: ''; position: absolute; top: 0; left: -100%; width: 55%; height: 100%;
+      background: linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);
+      animation: sh 1.6s infinite;
     }
+    @keyframes sh { to { left: 200%; } }
 
-    .btn-secondary:hover {
-      background: #f9fafb;
-      border-color: #9ca3af;
-    }
+    /* ── BIG COUNT DISPLAY ──────────────────────────────── */
+    .ph-hd { font-size: 15px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 3px; }
+    .ph-sub { font-size: 11px; color: var(--muted); margin-bottom: 10px; line-height: 1.4; }
+    .big-n { font-family: var(--mono); font-size: 38px; font-weight: 700; color: var(--blue); letter-spacing: -.03em; line-height: 1; }
+    .big-l { font-size: 10px; color: var(--xmuted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-top: 2px; }
+    .cnt-row { display: flex; align-items: baseline; gap: 5px; }
+    .cnt-sep { font-size: 16px; color: var(--xmuted); }
+    .cnt-tot { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--muted); }
 
-    #usage-error {
-      font-size: 12px;
-      color: #dc2626;
-      min-height: 16px;
-      margin-bottom: 8px;
-    }
+    /* ── RESULT CARD ────────────────────────────────────── */
+    .rc { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; margin-bottom: 11px; }
+    .rr { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .rr:last-child { border-bottom: none; }
+    .rl { color: var(--muted); }
+    .rv { font-family: var(--mono); font-weight: 700; font-size: 12px; }
+    .rv-g { color: var(--green); }
+    .rv-a { color: var(--amber); }
 
-    /* ── Upgrade card ────────────────────────────────────────────── */
+    /* ── JOB CARD ───────────────────────────────────────── */
+    .jc { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: 6px; padding: 9px 11px; margin-bottom: 10px; }
+    .jc-co { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+    .jc-ti { font-size: 13px; font-weight: 600; margin: 2px 0 3px; line-height: 1.2; }
+    .jc-sc { font-family: var(--mono); font-size: 11px; color: var(--blue); font-weight: 700; }
 
-    .upgrade-card {
-      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-      border: 1px solid #bfdbfe;
-      border-radius: 8px;
-      padding: 14px;
-      margin-bottom: 12px;
-    }
+    /* ── DIVIDER ────────────────────────────────────────── */
+    .div { border: none; border-top: 1px solid var(--border); margin: 11px 0; }
 
-    .upgrade-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: #1e3a8a;
-      margin-bottom: 6px;
-    }
+    /* ── USAGE CARD ─────────────────────────────────────── */
+    .uc { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 9px 11px; margin-bottom: 9px; }
+    .uc-l { font-size: 9px; font-weight: 700; color: var(--xmuted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+    .uc-n { font-family: var(--mono); font-size: 18px; font-weight: 700; line-height: 1; }
+    .uc-n span { font-size: 11px; font-weight: 400; color: var(--muted); }
+    .uc-bt { margin-top: 6px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .uc-bf { height: 100%; background: var(--blue); border-radius: 2px; transition: width .3s; }
+    .uc-r { font-size: 10px; color: var(--xmuted); margin-top: 4px; font-family: var(--mono); }
 
-    .upgrade-perks {
-      font-size: 11px;
-      color: #1e40af;
-      margin-bottom: 10px;
-      line-height: 1.5;
-    }
+    /* ── UPGRADE CARD ───────────────────────────────────── */
+    .up { background: var(--blue-lt); border: 1px solid var(--blue-bd); border-radius: 7px; padding: 10px 11px; margin-bottom: 9px; }
+    .up-t { font-size: 11px; font-weight: 700; color: #1e3a8a; margin-bottom: 3px; }
+    .up-p { font-size: 10px; color: #1e40af; margin-bottom: 8px; line-height: 1.5; }
+    .plan-row { display: flex; gap: 5px; margin-bottom: 7px; }
+    .plan-btn { flex: 1; padding: 5px 4px; background: white; border: 1px solid var(--blue-bd); border-radius: 4px; font-size: 10px; color: #1e3a8a; cursor: pointer; text-align: center; font-family: inherit; transition: background .1s; }
+    .plan-btn:hover { background: #dbeafe; }
+    .plan-btn.sel { background: var(--blue); color: white; border-color: var(--blue); }
+    .plan-n { font-weight: 700; display: block; }
+    .plan-p { font-size: 9px; opacity: .85; font-family: var(--mono); }
+    .btn-up { width: 100%; padding: 6px; background: var(--blue); color: white; border: none; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background .12s; letter-spacing: .02em; }
+    .btn-up:hover { background: var(--blue-h); }
+    .pro-badge { display: inline-block; padding: 1px 5px; background: var(--blue); color: white; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-family: var(--mono); }
 
-    .plan-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
+    /* ── SPINNER ────────────────────────────────────────── */
+    .spin-w { text-align: center; padding: 18px 0 14px; }
+    .spin { width: 28px; height: 28px; border: 2.5px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: rot .7s linear infinite; margin: 0 auto 10px; }
+    @keyframes rot { to { transform: rotate(360deg); } }
 
-    .plan-btn {
-      flex: 1;
-      padding: 8px 6px;
-      background: #ffffff;
-      border: 1px solid #93c5fd;
-      border-radius: 6px;
-      font-size: 11px;
-      color: #1e3a8a;
-      cursor: pointer;
-      text-align: center;
-      transition: background 0.15s, border-color 0.15s;
-    }
+    /* ── MISC ───────────────────────────────────────────── */
+    .mt8  { margin-top: 8px; }
+    .mt10 { margin-top: 10px; }
+    .mb8  { margin-bottom: 8px; }
+    .mb10 { margin-bottom: 10px; }
+    .tc   { text-align: center; }
+    .tx   { font-size: 10px; color: var(--xmuted); }
+    .stat-muted { font-size: 9px; color: var(--xmuted); }
 
-    .plan-btn:hover {
-      background: #eff6ff;
-      border-color: #2563eb;
-    }
-
-    .plan-btn.selected {
-      background: #2563eb;
-      color: #ffffff;
-      border-color: #2563eb;
-    }
-
-    .plan-name {
-      font-weight: 600;
-      display: block;
-    }
-
-    .plan-price {
-      font-size: 10px;
-      opacity: 0.9;
-    }
-
-    .btn-upgrade {
-      width: 100%;
-      padding: 9px;
-      background: #2563eb;
-      color: #ffffff;
-      border: none;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .btn-upgrade:hover { background: #1d4ed8; }
-    .btn-upgrade:disabled { background: #93c5fd; cursor: not-allowed; }
-
-    .pro-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      background: #2563eb;
-      color: #ffffff;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    #billing-error {
-      font-size: 11px;
-      color: #dc2626;
-      min-height: 14px;
-      margin-bottom: 6px;
-    }
+    /* ── LOGIN VIEW ─────────────────────────────────────── */
+    #login-view { padding: 16px 15px; }
+    #login-view .sub { font-size: 12px; color: var(--muted); margin: 2px 0 14px; }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <div class="header-logo"></div>
-    <h1>JobCrawler</h1>
+  <!-- HEADER (always visible) -->
+  <div class="hd">
+    <div class="logo"><div class="logo-arrow"></div></div>
+    <span class="hd-title">JobCrawler</span>
+    <span class="hd-badge">Agent</span>
   </div>
 
-  <!-- ── Login state ─────────────────────────────────────────────── -->
-  <div id="login-view">
-    <p class="subtitle" style="margin-top:14px;">Sign in to your account</p>
-
+  <!-- ══════════════════════════════════════════════════════
+       NOT_LOGGED_IN
+  ══════════════════════════════════════════════════════════ -->
+  <div id="login-view" class="view on">
+    <p class="sub">Sign in to your account</p>
     <form id="login-form" novalidate>
-      <div class="field">
-        <label for="email-input">Email</label>
+      <div class="f">
+        <label class="lbl" for="email-input">Email</label>
         <input id="email-input" type="email" placeholder="you@example.com" autocomplete="email" required />
       </div>
-      <div class="field">
-        <label for="password-input">Password</label>
+      <div class="f">
+        <label class="lbl" for="password-input">Password</label>
         <input id="password-input" type="password" placeholder="••••••••" autocomplete="current-password" required />
       </div>
-      <p id="login-error"></p>
-      <button id="login-btn" class="btn-primary" type="submit">Login</button>
+      <p id="login-error" class="err"></p>
+      <button id="login-btn" class="btn btn-p" type="submit">Sign In</button>
     </form>
   </div>
 
-  <!-- ── Logged-in state ────────────────────────────────────────── -->
-  <div id="loggedin-view">
-    <div class="user-row" style="margin-top:14px;">
-      <div class="avatar" id="user-avatar">?</div>
-      <div class="user-info">
-        <div class="user-email" id="user-email-display">—</div>
-        <div class="user-tier" id="user-tier-display"></div>
+  <!-- ══════════════════════════════════════════════════════
+       APP VIEW — all logged-in states
+  ══════════════════════════════════════════════════════════ -->
+  <div id="app-view" class="view">
+
+    <!-- user strip -->
+    <div class="usr">
+      <div class="avt" id="user-avatar">?</div>
+      <div id="user-email-display">—</div>
+      <div id="user-tier-display"></div>
+      <button class="icon-btn" id="logout-btn" title="Sign out">↩</button>
+    </div>
+
+    <!-- ─── NO_PREFERENCES ──────────────────────────────── -->
+    <div id="preferences-panel" class="panel">
+      <p class="ph-hd">Set up your search</p>
+      <p class="ph-sub">Configure once — the agent handles the rest.</p>
+
+      <div class="f">
+        <label class="lbl" for="pref-keywords">Keywords (comma-separated)</label>
+        <textarea id="pref-keywords" rows="2" placeholder="ml engineer, data scientist, machine learning"></textarea>
+      </div>
+      <div class="f">
+        <label class="lbl" for="pref-location">Location</label>
+        <input id="pref-location" type="text" placeholder="Bengaluru, Remote…" />
+      </div>
+      <div class="f">
+        <label class="lbl" for="pref-exp">Experience Level</label>
+        <select id="pref-exp">
+          <option value="">Any level</option>
+          <option value="2">Entry Level</option>
+          <option value="3">Associate</option>
+          <option value="2,3">Entry + Associate</option>
+          <option value="4">Mid-Senior</option>
+          <option value="2,3,4">All levels</option>
+        </select>
+      </div>
+      <div class="f-inline">
+        <input id="pref-remote" type="checkbox" />
+        <label for="pref-remote">Remote only</label>
+      </div>
+      <div class="f">
+        <label class="lbl">Auto-apply threshold</label>
+        <div class="sl-wrap">
+          <input id="pref-threshold" type="range" min="50" max="95" value="75" step="5" />
+          <span class="sl-val" id="pref-threshold-display">75</span>
+        </div>
+        <p class="tx mt8">Jobs scoring ≥ this are auto-approved.</p>
+      </div>
+
+      <p id="preferences-error" class="err"></p>
+      <button id="save-preferences-btn" class="btn btn-p">Save &amp; Continue</button>
+    </div>
+
+    <!-- ─── IDLE ─────────────────────────────────────────── -->
+    <div id="idle-panel" class="panel panel-s">
+      <div class="sg">
+        <div class="sb">
+          <div class="sn" id="stat-applied-today">—</div>
+          <div class="sl">Today</div>
+        </div>
+        <div class="sb">
+          <div class="sn" id="stat-applied-week">—</div>
+          <div class="sl">This Week</div>
+        </div>
+        <div class="sb">
+          <div class="sn" id="stat-queue">—</div>
+          <div class="sl">Queue</div>
+        </div>
+      </div>
+
+      <button id="discover-btn" class="btn btn-p mb8">Discover Jobs</button>
+      <button id="apply-btn" class="btn btn-g mb8">Apply to Queue</button>
+      <button id="review-btn" class="btn btn-g mb10" style="display:none">Review Scored Jobs</button>
+
+      <hr class="div" />
+
+      <div class="uc">
+        <div class="uc-l">AI Usage This Week</div>
+        <div class="uc-n" id="usage-count">— <span>/ —</span></div>
+        <div class="uc-bt"><div class="uc-bf" id="usage-bar" style="width:0%"></div></div>
+        <div class="uc-r" id="usage-reset"></div>
+      </div>
+      <p id="usage-error" class="err"></p>
+
+      <div class="up" id="upgrade-card" style="display:none">
+        <div class="up-t">Upgrade to Pro</div>
+        <div class="up-p">Unlimited applications · Unlimited AI scoring</div>
+        <div class="plan-row">
+          <button class="plan-btn sel" id="plan-monthly">
+            <span class="plan-n">Monthly</span><span class="plan-p">₹499/mo</span>
+          </button>
+          <button class="plan-btn" id="plan-annual">
+            <span class="plan-n">Annual</span><span class="plan-p">₹4,999/yr</span>
+          </button>
+        </div>
+        <p id="billing-error" class="err"></p>
+        <button id="upgrade-btn" class="btn-up">Upgrade Now →</button>
+      </div>
+
+      <div class="uc" id="pro-status-card" style="display:none">
+        <div class="uc-l">Plan</div>
+        <div style="display:flex;align-items:center;gap:7px;margin-top:4px">
+          <span class="pro-badge">Pro</span>
+          <span id="pro-plan-label" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+        <div class="uc-r" id="pro-expires"></div>
       </div>
     </div>
 
-    <div class="usage-card">
-      <div class="usage-label">Usage this week</div>
-      <div class="usage-count" id="usage-count">— <span>/ —</span></div>
-      <div class="usage-bar-track">
-        <div class="usage-bar-fill" id="usage-bar" style="width:0%"></div>
-      </div>
-      <div class="usage-reset" id="usage-reset"></div>
+    <!-- ─── DISCOVERING ──────────────────────────────────── -->
+    <div id="discovering-panel" class="panel">
+      <p class="ph-hd">Discovering Jobs</p>
+      <p class="ph-sub" id="disc-keyword-label">Scanning LinkedIn…</p>
+
+      <div class="big-n" id="disc-found">0</div>
+      <div class="big-l mb8">jobs found</div>
+
+      <div class="pt"><div class="pf" id="disc-progress-bar" style="width:0%"></div></div>
+      <p class="tx mb10" id="disc-progress-label">keyword 0 of 0</p>
+
+      <button id="stop-discovery-btn" class="btn btn-d btn-sm">Stop Discovery</button>
     </div>
 
-    <p id="usage-error"></p>
+    <!-- ─── ENRICHING ────────────────────────────────────── -->
+    <div id="enriching-panel" class="panel">
+      <p class="ph-hd">Reading Descriptions</p>
+      <p class="ph-sub">Visiting each job page for the full description.</p>
 
-    <!-- Upgrade card (free tier only) -->
-    <div class="upgrade-card" id="upgrade-card" style="display:none;">
-      <div class="upgrade-title">⚡ Upgrade to Pro</div>
-      <div class="upgrade-perks">
-        Unlimited applications<br />
-        Unlimited AI calls
+      <div class="cnt-row">
+        <span class="big-n" id="enrich-current">0</span>
+        <span class="cnt-sep">/</span>
+        <span class="cnt-tot" id="enrich-total">0</span>
       </div>
-      <div class="plan-row">
-        <button class="plan-btn selected" data-plan="monthly" id="plan-monthly">
-          <span class="plan-name">Monthly</span>
-          <span class="plan-price">₹499/mo</span>
-        </button>
-        <button class="plan-btn" data-plan="annual" id="plan-annual">
-          <span class="plan-name">Annual</span>
-          <span class="plan-price">₹4,999/yr</span>
-        </button>
-      </div>
-      <p id="billing-error"></p>
-      <button id="upgrade-btn" class="btn-upgrade">Upgrade Now</button>
+      <div class="big-l mb8">jobs enriched</div>
+
+      <div class="pt"><div class="pf" id="enrich-progress-bar" style="width:0%"></div></div>
+
+      <button id="stop-enriching-btn" class="btn btn-d btn-sm mt10">Stop</button>
     </div>
 
-    <!-- Pro status (paid tier only) -->
-    <div class="usage-card" id="pro-status-card" style="display:none;">
-      <div class="usage-label">Plan</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-        <span class="pro-badge">Pro</span>
-        <span id="pro-plan-label" style="font-size:12px;color:#374151;"></span>
+    <!-- ─── SCORING ──────────────────────────────────────── -->
+    <div id="scoring-panel" class="panel">
+      <div class="spin-w">
+        <div class="spin"></div>
+        <p class="ph-hd">Scoring Jobs</p>
+        <p class="ph-sub">Matching descriptions against your profile with AI.</p>
+        <p class="tx">Usually 1–2 minutes.</p>
       </div>
-      <div class="usage-reset" id="pro-expires"></div>
     </div>
 
-    <button id="logout-btn" class="btn-secondary">Logout</button>
-  </div>
+    <!-- ─── READY ────────────────────────────────────────── -->
+    <div id="ready-panel" class="panel">
+      <p class="ph-hd">Discovery Complete</p>
+
+      <div class="rc mt10">
+        <div class="rr"><span class="rl">Discovered</span><span class="rv" id="ready-discovered">—</span></div>
+        <div class="rr"><span class="rl">After filter</span><span class="rv" id="ready-filtered">—</span></div>
+        <div class="rr"><span class="rl">Scored</span><span class="rv" id="ready-scored">—</span></div>
+        <div class="rr"><span class="rl">Auto-approved</span><span class="rv rv-g" id="ready-approved">—</span></div>
+        <div class="rr"><span class="rl">Needs review</span><span class="rv rv-a" id="ready-needs-review">—</span></div>
+      </div>
+
+      <button id="start-apply-btn" class="btn btn-p mb8">Start Applying</button>
+      <button id="ready-back-btn" class="btn btn-g btn-sm">Back to Dashboard</button>
+    </div>
+
+    <!-- ─── APPLYING ─────────────────────────────────────── -->
+    <div id="applying-panel" class="panel">
+      <p class="ph-hd">Applying</p>
+
+      <div class="jc" id="current-job-card" style="display:none">
+        <div class="jc-co" id="apply-company">—</div>
+        <div class="jc-ti" id="apply-title">—</div>
+        <div class="jc-sc" id="apply-score">Score —</div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+        <span class="tx">Progress</span>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:700">
+          <span id="apply-current">0</span><span style="color:var(--xmuted)"> / </span><span id="apply-total">0</span>
+        </span>
+      </div>
+      <div class="pt"><div class="pf" id="apply-progress-bar" style="width:0%"></div></div>
+
+      <div style="display:flex;gap:14px;margin:7px 0 10px;font-size:10px;color:var(--muted)">
+        <span>Applied <span style="font-family:var(--mono);font-weight:700;color:var(--green)" id="apply-applied">0</span></span>
+        <span>Skipped <span style="font-family:var(--mono);font-weight:700" id="apply-skipped">0</span></span>
+        <span>Failed <span style="font-family:var(--mono);font-weight:700" id="apply-failed">0</span></span>
+      </div>
+
+      <p id="apply-last-error" style="display:none;font-size:10px;color:var(--red);background:var(--red-lt);border:1px solid var(--red-bd);border-radius:4px;padding:5px 8px;margin-bottom:8px;line-height:1.4"></p>
+
+      <div class="btn-row">
+        <button id="pause-apply-btn" class="btn btn-g btn-sm">Pause</button>
+        <button id="stop-apply-btn" class="btn btn-d btn-sm">Stop</button>
+      </div>
+    </div>
+
+    <!-- ─── PAUSED ────────────────────────────────────────── -->
+    <div id="paused-panel" class="panel tc" style="padding-top:24px;padding-bottom:18px">
+      <div style="font-size:26px;margin-bottom:7px;opacity:.6">⏸</div>
+      <p class="ph-hd">Paused</p>
+      <p class="ph-sub">Auto-apply session is paused.</p>
+      <button id="resume-apply-btn" class="btn btn-p mb8">Resume</button>
+      <button id="paused-stop-btn" class="btn btn-d btn-sm">End Session</button>
+    </div>
+
+    <!-- ─── COMPLETE ──────────────────────────────────────── -->
+    <!-- ─── REVIEW ─────────────────────────────────────────────────────────────── -->
+    <div id="review-panel" class="panel panel-s">
+      <p class="ph-hd">Scored Jobs</p>
+      <p class="ph-sub" id="review-subtitle">Loading…</p>
+      <div id="review-job-list"></div>
+      <p id="review-error" class="err"></p>
+      <div class="btn-row mt10">
+        <button id="review-back-btn" class="btn btn-g btn-sm">Back</button>
+        <button id="approve-all-btn" class="btn btn-p btn-sm">Approve All</button>
+      </div>
+    </div>
+
+    <div id="complete-panel" class="panel tc" style="padding-top:20px;padding-bottom:16px">
+      <div style="font-size:30px;margin-bottom:7px;line-height:1" id="complete-icon">✓</div>
+      <p class="ph-hd" id="complete-title">Session Complete</p>
+
+      <div class="rc mt10" style="text-align:left">
+        <div class="rr"><span class="rl">Applied</span><span class="rv rv-g" id="complete-applied">0</span></div>
+        <div class="rr"><span class="rl">Skipped</span><span class="rv" id="complete-skipped">0</span></div>
+        <div class="rr"><span class="rl">Failed</span><span class="rv" id="complete-failed">0</span></div>
+        <div class="rr" id="complete-reason-row" style="display:none">
+          <span class="rl">Stopped</span>
+          <span class="rv" id="complete-reason">—</span>
+        </div>
+      </div>
+
+      <button id="complete-discover-btn" class="btn btn-p mb8">Discover More</button>
+      <button id="complete-idle-btn" class="btn btn-g btn-sm">Back to Dashboard</button>
+    </div>
+
+  </div><!-- #app-view -->
 
   <script src="dist/popup.js" type="module"></script>
 </body>

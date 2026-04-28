@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JobCrawler — Apply to LinkedIn jobs while you sleep</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        serif: ['"Instrument Serif"', 'ui-serif', 'Georgia']
+      },
+      colors: {
+        ink:    '#0B0B0F',
+        ink2:   '#111116',
+        line:   '#1F1F26',
+        line2:  '#2A2A33',
+        cream:  '#EDE6D6',
+        cream2: '#A8A192',
+        mute:   '#6B6A63',
+        amber:  '#FF8A1F',
+        amber2: '#FFB061',
+        green:  '#7DDC8A',
+        red:    '#FF6A6A',
+      }
+    }
+  }
+}
+</script>
+<style>
+  html, body { background: #0B0B0F; color: #EDE6D6; }
+  body { font-feature-settings: "ss01","cv11"; }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(237,230,214,0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(237,230,214,0.04) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+  .grain::before {
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:.06; mix-blend-mode:overlay;
+    background-image: radial-gradient(rgba(255,255,255,0.6) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+  .hairline { border-color: #1F1F26; }
+  .hairline2 { border-color: #2A2A33; }
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+  .num { font-variant-numeric: tabular-nums; }
+  /* Marquee */
+  @keyframes marquee { 0% { transform: translateX(0) } 100% { transform: translateX(-50%) } }
+  .marquee-track { animation: marquee 60s linear infinite; }
+  /* Blink dot */
+  @keyframes blink { 0%, 60% { opacity: 1 } 80%, 100% { opacity: .25 } }
+  .blink { animation: blink 1.4s ease-in-out infinite; }
+  /* Crawl log row enter */
+  @keyframes rowin { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+  .row-in { animation: rowin .35s ease-out both; }
+  /* Spinning */
+  @keyframes spin360 { to { transform: rotate(360deg) } }
+  .spin360 { animation: spin360 2.4s linear infinite; }
+  /* Score bar fill */
+  @keyframes fill { from { width: 0 } to { width: var(--w) } }
+  .fillbar > i { animation: fill .9s ease-out both; }
+
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] .chev { transform: rotate(45deg); }
+  .chev { transition: transform .25s ease; }
+
+  /* Subtle ambient highlight behind hero */
+  .glow {
+    background: radial-gradient(60% 50% at 70% 0%, rgba(255,138,31,0.18), transparent 60%),
+                radial-gradient(40% 40% at 10% 20%, rgba(125,220,138,0.06), transparent 60%);
+  }
+  ::selection { background: #FF8A1F; color: #0B0B0F; }
+</style>
+</head>
+<body class="font-sans antialiased">
+
+<!-- ============== TOP BAR ============== -->
+<div class="border-b hairline">
+  <div class="max-w-[1240px] mx-auto px-6 h-10 flex items-center justify-between text-[11px] font-mono text-cream2">
+    <div class="flex items-center gap-4">
+      <span class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-green blink"></span>
+        <span>SYSTEM ONLINE · 4,218 applications today</span>
+      </span>
+    </div>
+    <div class="hidden md:flex items-center gap-5">
+      <span>v1.4.2</span>
+      <span>·</span>
+      <span>Made in Bengaluru</span>
+      <span>·</span>
+      <a href="#changelog" class="hover:text-cream">changelog →</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============== NAV ============== -->
+<header class="border-b hairline">
+  <div class="max-w-[1240px] mx-auto px-6 h-16 flex items-center justify-between">
+    <a href="#" class="flex items-center gap-2.5">
+      <!-- Logo: spider/crawler glyph -->
+      <span class="relative w-7 h-7 inline-flex items-center justify-center">
+        <span class="absolute inset-0 rounded-md border hairline2"></span>
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7">
+          <circle cx="12" cy="12" r="3.2" class="text-amber" stroke="currentColor"/>
+          <path d="M12 8.8V4M12 15.2V20M8.8 12H4M15.2 12H20M9.7 9.7L6.3 6.3M14.3 9.7L17.7 6.3M9.7 14.3L6.3 17.7M14.3 14.3L17.7 17.7" class="text-cream"/>
+        </svg>
+      </span>
+      <span class="font-semibold tracking-tight text-[15px]">JobCrawler</span>
+      <span class="ml-1 text-[10px] font-mono text-mute uppercase tracking-widest">/early access</span>
+    </a>
+    <nav class="hidden md:flex items-center gap-7 text-[13px] text-cream2">
+      <a href="#how" class="hover:text-cream">How it works</a>
+      <a href="#demo" class="hover:text-cream">Live demo</a>
+      <a href="#trust" class="hover:text-cream">Safety</a>
+      <a href="#pricing" class="hover:text-cream">Pricing</a>
+      <a href="#faq" class="hover:text-cream">FAQ</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <a href="#" class="hidden md:inline-flex h-9 items-center px-3 text-[13px] text-cream2 hover:text-cream">Sign in</a>
+      <a href="#install" class="inline-flex items-center gap-2 h-9 px-3.5 rounded-md bg-cream text-ink text-[13px] font-medium hover:bg-white transition">
+        <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 4.5l4.3 7.4H7.7L12 6.5z"/></svg>
+        Add to Chrome
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ============== HERO ============== -->
+<section class="relative overflow-hidden glow">
+  <div class="absolute inset-0 grid-bg opacity-50"></div>
+  <div class="relative max-w-[1240px] mx-auto px-6 pt-20 pb-24 md:pt-28 md:pb-32">
+
+    <div class="flex items-center gap-3 text-[11px] font-mono text-cream2 mb-7">
+      <span class="px-2 py-1 border hairline2 rounded-full">CHROME · MV3</span>
+      <span class="px-2 py-1 border hairline2 rounded-full">LinkedIn Easy Apply</span>
+      <span class="px-2 py-1 border hairline2 rounded-full">India · Remote</span>
+    </div>
+
+    <h1 class="font-serif text-[68px] md:text-[104px] leading-[0.95] tracking-[-0.02em] text-balance max-w-[12ch]">
+      Apply to <span class="italic text-amber">300 jobs</span><br/>
+      while you <span class="italic">sleep.</span>
+    </h1>
+
+    <p class="mt-8 max-w-[58ch] text-[18px] md:text-[19px] leading-[1.55] text-cream2 text-pretty">
+      JobCrawler is a Chrome extension that scans LinkedIn for matching roles, scores each one against your profile with an LLM, and auto-applies to the best ones — at human speed, while you do literally anything else.
+    </p>
+
+    <div class="mt-10 flex flex-wrap items-center gap-3">
+      <a href="#install" class="group inline-flex items-center gap-2.5 h-12 px-5 rounded-md bg-amber text-ink text-[15px] font-semibold hover:bg-amber2 transition">
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 4l4.3 7.4H7.7L12 6z"/></svg>
+        Add to Chrome — it's free for 7 days
+        <svg viewBox="0 0 24 24" class="w-4 h-4 -mr-0.5 transition group-hover:translate-x-0.5" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+      <a href="#demo" class="inline-flex items-center gap-2 h-12 px-4 rounded-md border hairline2 text-[14px] text-cream hover:bg-ink2">
+        Watch it run →
+      </a>
+      <span class="ml-1 text-[12px] font-mono text-mute">no card · uninstall in one click</span>
+    </div>
+
+    <!-- Hero meta strip -->
+    <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-px bg-line2 border hairline2 rounded-lg overflow-hidden">
+      <div class="bg-ink p-5">
+        <div class="text-[11px] font-mono text-mute uppercase tracking-wider">Avg. apps / night</div>
+        <div class="mt-2 font-mono text-3xl num text-cream">142</div>
+      </div>
+      <div class="bg-ink p-5">
+        <div class="text-[11px] font-mono text-mute uppercase tracking-wider">Median match score</div>
+        <div class="mt-2 font-mono text-3xl num text-cream">87<span class="text-cream2 text-xl">/100</span></div>
+      </div>
+      <div class="bg-ink p-5">
+        <div class="text-[11px] font-mono text-mute uppercase tracking-wider">Time saved / wk</div>
+        <div class="mt-2 font-mono text-3xl num text-cream">14h</div>
+      </div>
+      <div class="bg-ink p-5">
+        <div class="text-[11px] font-mono text-mute uppercase tracking-wider">Bengaluru users</div>
+        <div class="mt-2 font-mono text-3xl num text-cream">2,400+</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============== LIVE TICKER ============== -->
+<section class="border-y hairline overflow-hidden bg-ink2/60">
+  <div class="relative">
+    <div class="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-ink2 to-transparent z-10"></div>
+    <div class="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-ink2 to-transparent z-10"></div>
+    <div class="flex marquee-track whitespace-nowrap py-3 font-mono text-[12px] text-cream2">
+      <!-- duplicated for seamless loop -->
+      <div class="flex gap-10 px-5 shrink-0">
+        <span><span class="text-green">●</span> applied · ML Engineer @ Razorpay · Bengaluru · 94/100</span>
+        <span><span class="text-green">●</span> applied · Senior Backend @ Swiggy · Remote · 91/100</span>
+        <span><span class="text-amber">●</span> reviewed · Data Scientist @ Cred · Bengaluru · 78/100</span>
+        <span><span class="text-green">●</span> applied · Staff ML @ Flipkart · Bengaluru · 96/100</span>
+        <span><span class="text-green">●</span> applied · Backend Engineer @ Zerodha · Remote · 89/100</span>
+        <span><span class="text-mute">○</span> skipped · Frontend Lead @ Meesho · 41/100 (off-target)</span>
+        <span><span class="text-green">●</span> applied · Applied Scientist @ Sprinklr · Remote · 92/100</span>
+        <span><span class="text-green">●</span> applied · Backend SDE-2 @ PhonePe · Bengaluru · 90/100</span>
+      </div>
+      <div class="flex gap-10 px-5 shrink-0" aria-hidden="true">
+        <span><span class="text-green">●</span> applied · ML Engineer @ Razorpay · Bengaluru · 94/100</span>
+        <span><span class="text-green">●</span> applied · Senior Backend @ Swiggy · Remote · 91/100</span>
+        <span><span class="text-amber">●</span> reviewed · Data Scientist @ Cred · Bengaluru · 78/100</span>
+        <span><span class="text-green">●</span> applied · Staff ML @ Flipkart · Bengaluru · 96/100</span>
+        <span><span class="text-green">●</span> applied · Backend Engineer @ Zerodha · Remote · 89/100</span>
+        <span><span class="text-mute">○</span> skipped · Frontend Lead @ Meesho · 41/100 (off-target)</span>
+        <span><span class="text-green">●</span> applied · Applied Scientist @ Sprinklr · Remote · 92/100</span>
+        <span><span class="text-green">●</span> applied · Backend SDE-2 @ PhonePe · Bengaluru · 90/100</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== HOW IT WORKS ============== -->
+<section id="how" class="py-28">
+  <div class="max-w-[1240px] mx-auto px-6">
+    <div class="flex items-end justify-between flex-wrap gap-6 mb-14">
+      <div class="max-w-2xl">
+        <div class="font-mono text-[11px] uppercase tracking-widest text-amber">/01 · how it works</div>
+        <h2 class="mt-3 font-serif text-5xl md:text-6xl tracking-tight leading-[1.02]">Set it up once.<br/><span class="italic text-cream2">Then forget it exists.</span></h2>
+      </div>
+      <p class="max-w-sm text-cream2 text-[15px] leading-relaxed">
+        The whole loop runs in your browser. Your LinkedIn session never leaves the device. We never ask for your password.
+      </p>
+    </div>
+
+    <!-- 4 step cards -->
+    <div class="grid md:grid-cols-2 gap-px bg-line2 border hairline2 rounded-xl overflow-hidden">
+
+      <!-- Step 1 -->
+      <div class="bg-ink p-8 md:p-10">
+        <div class="flex items-baseline justify-between">
+          <div class="font-mono text-[11px] text-mute">STEP 01</div>
+          <div class="font-mono text-[11px] text-cream2">~3 min</div>
+        </div>
+        <h3 class="mt-3 font-serif text-3xl">Tell us who you are.</h3>
+        <p class="mt-3 text-cream2 text-[14.5px] leading-relaxed">Drop in your resume. Confirm your skills, years of experience, salary band, and target locations. We'll auto-extract everything else.</p>
+
+        <!-- mock profile form -->
+        <div class="mt-6 border hairline rounded-lg bg-ink2/60 p-4 font-mono text-[12px]">
+          <div class="flex items-center gap-2 text-mute mb-3"><span class="w-2 h-2 rounded-full bg-red"></span><span class="w-2 h-2 rounded-full bg-amber"></span><span class="w-2 h-2 rounded-full bg-green"></span><span class="ml-2">profile.json</span></div>
+          <div class="space-y-1.5 text-cream2">
+            <div><span class="text-mute">name:</span> <span class="text-cream">"Aarav Sharma"</span></div>
+            <div><span class="text-mute">role:</span> <span class="text-cream">"ML Engineer"</span></div>
+            <div><span class="text-mute">years:</span> <span class="text-amber">4</span></div>
+            <div><span class="text-mute">skills:</span> <span class="text-cream">["pytorch", "ranking", "llm-eval", ...]</span></div>
+            <div><span class="text-mute">target_locations:</span> <span class="text-cream">["Bengaluru", "Remote-IN"]</span></div>
+            <div><span class="text-mute">min_ctc:</span> <span class="text-amber">28<span class="text-mute">L</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="bg-ink p-8 md:p-10">
+        <div class="flex items-baseline justify-between">
+          <div class="font-mono text-[11px] text-mute">STEP 02</div>
+          <div class="font-mono text-[11px] text-cream2">click once</div>
+        </div>
+        <h3 class="mt-3 font-serif text-3xl">Hit <span class="italic">Crawl</span>.</h3>
+        <p class="mt-3 text-cream2 text-[14.5px] leading-relaxed">Open LinkedIn. The extension paginates through Easy Apply listings that match your filters. Hundreds of jobs, indexed in minutes.</p>
+
+        <div class="mt-6 border hairline rounded-lg bg-ink2/60 p-5">
+          <div class="flex items-center justify-between">
+            <div class="font-mono text-[11px] text-cream2">CRAWLING /jobs/search</div>
+            <div class="font-mono text-[11px] text-amber flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber blink"></span> live</div>
+          </div>
+          <div class="mt-4 h-2 bg-line rounded-full overflow-hidden">
+            <div class="h-full bg-amber" style="width:67%"></div>
+          </div>
+          <div class="mt-3 flex items-center justify-between font-mono text-[11px]">
+            <span class="text-cream">page 14 / 21</span>
+            <span class="text-cream2 num">312 jobs found</span>
+          </div>
+          <div class="mt-5 grid grid-cols-3 gap-2 font-mono text-[10.5px] text-cream2">
+            <div class="border hairline rounded px-2 py-1.5">~1.8s/page</div>
+            <div class="border hairline rounded px-2 py-1.5">human delay</div>
+            <div class="border hairline rounded px-2 py-1.5">no headless</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="bg-ink p-8 md:p-10">
+        <div class="flex items-baseline justify-between">
+          <div class="font-mono text-[11px] text-mute">STEP 03</div>
+          <div class="font-mono text-[11px] text-cream2">LLM scoring</div>
+        </div>
+        <h3 class="mt-3 font-serif text-3xl">Each job gets a <span class="italic text-amber">score</span>.</h3>
+        <p class="mt-3 text-cream2 text-[14.5px] leading-relaxed">Every JD is read against your profile by a tuned LLM. Below your threshold (default: 75) we skip. Above, we queue for application.</p>
+
+        <div class="mt-6 space-y-2.5">
+          <!-- score row -->
+          <div class="border hairline rounded-md bg-ink2/60 p-3 flex items-center gap-3 font-mono text-[12px]">
+            <div class="w-9 text-cream num">94</div>
+            <div class="flex-1 fillbar h-1.5 bg-line rounded-full overflow-hidden"><i class="block h-full bg-green" style="--w:94%"></i></div>
+            <div class="text-cream2 truncate w-40 text-right">Staff ML @ Flipkart</div>
+          </div>
+          <div class="border hairline rounded-md bg-ink2/60 p-3 flex items-center gap-3 font-mono text-[12px]">
+            <div class="w-9 text-cream num">88</div>
+            <div class="flex-1 fillbar h-1.5 bg-line rounded-full overflow-hidden"><i class="block h-full bg-green" style="--w:88%"></i></div>
+            <div class="text-cream2 truncate w-40 text-right">SDE-2 Backend @ Zerodha</div>
+          </div>
+          <div class="border hairline rounded-md bg-ink2/60 p-3 flex items-center gap-3 font-mono text-[12px]">
+            <div class="w-9 text-cream num">61</div>
+            <div class="flex-1 fillbar h-1.5 bg-line rounded-full overflow-hidden"><i class="block h-full bg-amber" style="--w:61%"></i></div>
+            <div class="text-cream2 truncate w-40 text-right">Frontend @ Razorpay</div>
+          </div>
+          <div class="border hairline rounded-md bg-ink2/60 p-3 flex items-center gap-3 font-mono text-[12px] opacity-60">
+            <div class="w-9 text-mute num">38</div>
+            <div class="flex-1 fillbar h-1.5 bg-line rounded-full overflow-hidden"><i class="block h-full bg-mute" style="--w:38%"></i></div>
+            <div class="text-mute truncate w-40 text-right line-through">QA Manual @ Infosys</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="bg-ink p-8 md:p-10">
+        <div class="flex items-baseline justify-between">
+          <div class="font-mono text-[11px] text-mute">STEP 04</div>
+          <div class="font-mono text-[11px] text-cream2">overnight</div>
+        </div>
+        <h3 class="mt-3 font-serif text-3xl">It applies. <span class="italic">Slowly.</span></h3>
+        <p class="mt-3 text-cream2 text-[14.5px] leading-relaxed">Random delays between 40s–4min. Mouse jitter. Realistic typing. It looks like you, having a productive evening — not a script.</p>
+
+        <div class="mt-6 border hairline rounded-lg bg-ink2/60 p-4 font-mono text-[12px] space-y-1.5">
+            <div class="flex justify-between"><span class="text-mute">22:14:08</span><span class="text-green">→ apply: ML @ Razorpay</span></div>
+            <div class="flex justify-between"><span class="text-mute">22:16:51</span><span class="text-cream">resume.pdf attached</span></div>
+            <div class="flex justify-between"><span class="text-mute">22:17:33</span><span class="text-cream">screening Q&amp;A · 4 fields</span></div>
+            <div class="flex justify-between"><span class="text-mute">22:18:44</span><span class="text-green">✓ submitted</span></div>
+            <div class="flex justify-between"><span class="text-mute">22:21:02</span><span class="text-cream2">→ idle 2m 18s</span></div>
+            <div class="flex justify-between"><span class="text-mute">22:23:20</span><span class="text-green">→ apply: Backend @ Zerodha</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============== LIVE DEMO / DASHBOARD ============== -->
+<section id="demo" class="border-y hairline bg-ink2/40 py-28">
+  <div class="max-w-[1240px] mx-auto px-6">
+    <div class="max-w-2xl mb-14">
+      <div class="font-mono text-[11px] uppercase tracking-widest text-amber">/02 · live demo</div>
+      <h2 class="mt-3 font-serif text-5xl md:text-6xl tracking-tight leading-[1.02]">This is exactly<br/>what you'll see.</h2>
+    </div>
+
+    <!-- Dashboard mock -->
+    <div class="border hairline2 rounded-2xl overflow-hidden bg-ink shadow-2xl shadow-black/40">
+      <!-- chrome -->
+      <div class="flex items-center gap-2 px-4 h-10 border-b hairline bg-ink2">
+        <span class="w-3 h-3 rounded-full bg-red/80"></span>
+        <span class="w-3 h-3 rounded-full bg-amber/80"></span>
+        <span class="w-3 h-3 rounded-full bg-green/80"></span>
+        <div class="ml-4 flex-1 max-w-md mx-auto h-6 rounded-md bg-ink border hairline px-3 flex items-center gap-2 font-mono text-[11px] text-cream2">
+          <svg viewBox="0 0 24 24" class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 100 16 8 8 0 000-16zM2 12h20M12 2a14 14 0 010 20M12 2a14 14 0 000 20"/></svg>
+          jobcrawler.app/run
+        </div>
+        <div class="font-mono text-[10px] text-mute">JobCrawler ·  agent</div>
+      </div>
+
+      <div class="grid lg:grid-cols-[260px_1fr_300px] min-h-[560px]">
+        <!-- left rail -->
+        <aside class="border-r hairline p-5 hidden lg:flex flex-col gap-1">
+          <div class="font-mono text-[10px] text-mute uppercase tracking-widest mb-3">Run · #00481</div>
+          <button class="text-left px-3 py-2 rounded-md bg-amber text-ink font-medium text-[13px] flex items-center justify-between">
+            Live feed <span class="font-mono text-[10px]">●</span>
+          </button>
+          <button class="text-left px-3 py-2 rounded-md text-cream2 hover:bg-ink2 text-[13px] flex items-center justify-between">Queue <span class="font-mono text-[11px] text-mute">214</span></button>
+          <button class="text-left px-3 py-2 rounded-md text-cream2 hover:bg-ink2 text-[13px] flex items-center justify-between">Applied <span class="font-mono text-[11px] text-mute">98</span></button>
+          <button class="text-left px-3 py-2 rounded-md text-cream2 hover:bg-ink2 text-[13px] flex items-center justify-between">Skipped <span class="font-mono text-[11px] text-mute">156</span></button>
+          <button class="text-left px-3 py-2 rounded-md text-cream2 hover:bg-ink2 text-[13px]">Profile</button>
+          <button class="text-left px-3 py-2 rounded-md text-cream2 hover:bg-ink2 text-[13px]">Settings</button>
+
+          <div class="mt-auto pt-6 border-t hairline">
+            <div class="font-mono text-[10px] text-mute uppercase tracking-widest mb-2">Current Run</div>
+            <div class="flex items-center gap-2">
+              <div class="relative w-10 h-10">
+                <svg viewBox="0 0 36 36" class="w-10 h-10 -rotate-90">
+                  <circle cx="18" cy="18" r="15" stroke="#1F1F26" stroke-width="3" fill="none"/>
+                  <circle cx="18" cy="18" r="15" stroke="#FF8A1F" stroke-width="3" fill="none" stroke-dasharray="94 100" stroke-linecap="round"/>
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center font-mono text-[10px] text-cream">94%</span>
+              </div>
+              <div class="font-mono text-[11px] text-cream2 leading-tight">
+                <div>3h 12m elapsed</div>
+                <div class="text-mute">est. 18m left</div>
+              </div>
+            </div>
+            <div class="mt-3 flex gap-2">
+              <button class="flex-1 h-8 rounded-md border hairline2 font-mono text-[11px] text-cream hover:bg-ink2">Pause</button>
+              <button class="flex-1 h-8 rounded-md border hairline2 font-mono text-[11px] text-red hover:bg-ink2">Stop</button>
+            </div>
+          </div>
+        </aside>
+
+        <!-- center: live feed -->
+        <div class="border-r hairline">
+          <div class="flex items-center justify-between px-5 h-12 border-b hairline">
+            <div class="flex items-center gap-3">
+              <span class="font-mono text-[12px] text-cream">live feed</span>
+              <span class="px-1.5 py-0.5 rounded bg-green/10 text-green font-mono text-[10px] flex items-center gap-1.5"><span class="w-1.5 h-1.5 bg-green rounded-full blink"></span>RECORDING</span>
+            </div>
+            <div class="font-mono text-[11px] text-cream2 flex items-center gap-4">
+              <span>queue: <span class="text-cream num">214</span></span>
+              <span>applied: <span class="text-green num">98</span></span>
+              <span>skipped: <span class="text-mute num">156</span></span>
+            </div>
+          </div>
+
+          <div class="divide-y divide-line">
+            <!-- row -->
+            <div class="px-5 py-4 flex items-center gap-4 row-in" style="animation-delay: 0s">
+              <span class="font-mono text-[10px] text-mute w-14">22:48:11</span>
+              <span class="px-1.5 py-0.5 rounded bg-green/10 text-green font-mono text-[10px]">APPLY</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-[14px] truncate"><span class="font-medium">Senior ML Engineer</span> <span class="text-cream2">· Flipkart</span></div>
+                <div class="font-mono text-[11px] text-mute">Bengaluru · ₹40L–55L · 2 hrs ago</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-20 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-green" style="width:96%"></div></div>
+                <span class="font-mono text-[12px] num text-cream w-7 text-right">96</span>
+              </div>
+            </div>
+            <div class="px-5 py-4 flex items-center gap-4 row-in" style="animation-delay:.05s">
+              <span class="font-mono text-[10px] text-mute w-14">22:46:02</span>
+              <span class="px-1.5 py-0.5 rounded bg-green/10 text-green font-mono text-[10px]">APPLY</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-[14px] truncate"><span class="font-medium">Backend Engineer III</span> <span class="text-cream2">· Razorpay</span></div>
+                <div class="font-mono text-[11px] text-mute">Remote-IN · ₹28L–42L · 4 hrs ago</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-20 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-green" style="width:91%"></div></div>
+                <span class="font-mono text-[12px] num text-cream w-7 text-right">91</span>
+              </div>
+            </div>
+            <div class="px-5 py-4 flex items-center gap-4 row-in" style="animation-delay:.1s">
+              <span class="font-mono text-[10px] text-mute w-14">22:43:49</span>
+              <span class="px-1.5 py-0.5 rounded bg-amber/10 text-amber font-mono text-[10px]">REVIEW</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-[14px] truncate"><span class="font-medium">Data Scientist II</span> <span class="text-cream2">· Cred</span></div>
+                <div class="font-mono text-[11px] text-mute">Bengaluru · needs custom answer · flagged</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-20 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-amber" style="width:78%"></div></div>
+                <span class="font-mono text-[12px] num text-cream w-7 text-right">78</span>
+              </div>
+            </div>
+            <div class="px-5 py-4 flex items-center gap-4 row-in" style="animation-delay:.15s">
+              <span class="font-mono text-[10px] text-mute w-14">22:41:30</span>
+              <span class="px-1.5 py-0.5 rounded bg-green/10 text-green font-mono text-[10px]">APPLY</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-[14px] truncate"><span class="font-medium">Applied Scientist</span> <span class="text-cream2">· Sprinklr</span></div>
+                <div class="font-mono text-[11px] text-mute">Remote-IN · ₹35L–48L · 1 day ago</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-20 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-green" style="width:89%"></div></div>
+                <span class="font-mono text-[12px] num text-cream w-7 text-right">89</span>
+              </div>
+            </div>
+            <div class="px-5 py-4 flex items-center gap-4 opacity-60 row-in" style="animation-delay:.2s">
+              <span class="font-mono text-[10px] text-mute w-14">22:39:11</span>
+              <span class="px-1.5 py-0.5 rounded bg-line text-mute font-mono text-[10px]">SKIP</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-[14px] truncate text-cream2"><span class="font-medium">Frontend Lead</span> · Meesho</div>
+                <div class="font-mono text-[11px] text-mute">React/UI focus — outside profile</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-20 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-mute" style="width:41%"></div></div>
+                <span class="font-mono text-[12px] num text-mute w-7 text-right">41</span>
+              </div>
+            </div>
+            <div class="px-5 py-4 flex items-center gap-4 row-in" style="animation-delay:.25s">
+              <span class="font-mono text-[10px] text-mute w-14">22:36:55</span>
+              <span class="px-1.5 py-0.5 rounded bg-green/10 text-green font-mono text-[10px]">APPLY</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-[14px] truncate"><span class="font-medium">SDE-2 Platform</span> <span class="text-cream2">· PhonePe</span></div>
+                <div class="font-mono text-[11px] text-mute">Bengaluru · ₹32L–45L · 6 hrs ago</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-20 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-green" style="width:90%"></div></div>
+                <span class="font-mono text-[12px] num text-cream w-7 text-right">90</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 py-3 border-t hairline bg-ink2/60 flex items-center justify-between font-mono text-[11px] text-cream2">
+            <span class="flex items-center gap-2"><span class="w-1.5 h-1.5 bg-amber rounded-full blink"></span> applying to Backend Engineer @ Zerodha…</span>
+            <span class="text-mute">throttle: 1 app / 2m 14s</span>
+          </div>
+        </div>
+
+        <!-- right: detail -->
+        <aside class="hidden lg:block p-5">
+          <div class="font-mono text-[10px] text-mute uppercase tracking-widest mb-3">Inspecting</div>
+          <div class="font-serif text-2xl leading-tight">Senior ML Engineer</div>
+          <div class="text-cream2 text-[13px]">Flipkart · Bengaluru</div>
+
+          <div class="mt-5 flex items-end gap-3">
+            <div class="font-serif text-6xl text-amber leading-none">96</div>
+            <div class="font-mono text-[10px] text-cream2 mb-2">/ 100<br/>match score</div>
+          </div>
+
+          <div class="mt-6 space-y-3 text-[12.5px]">
+            <div class="flex justify-between gap-3"><span class="text-cream2">Skills overlap</span><span class="font-mono num text-cream">11 / 12</span></div>
+            <div class="flex justify-between gap-3"><span class="text-cream2">Seniority match</span><span class="font-mono text-green">staff ✓</span></div>
+            <div class="flex justify-between gap-3"><span class="text-cream2">Comp band</span><span class="font-mono text-green">in range ✓</span></div>
+            <div class="flex justify-between gap-3"><span class="text-cream2">Location</span><span class="font-mono text-green">BLR ✓</span></div>
+            <div class="flex justify-between gap-3"><span class="text-cream2">Easy Apply</span><span class="font-mono text-green">yes ✓</span></div>
+          </div>
+
+          <div class="mt-6 border-t hairline pt-5">
+            <div class="font-mono text-[10px] text-mute uppercase tracking-widest mb-2">LLM rationale</div>
+            <p class="text-[13px] text-cream2 leading-relaxed">"Strong overlap on PyTorch + ranking systems. Years of experience matches. Comp band aligns with Aarav's floor. Recommend apply."</p>
+          </div>
+
+          <button class="mt-6 w-full h-10 rounded-md bg-cream text-ink font-medium text-[13px]">Apply now →</button>
+        </aside>
+      </div>
+    </div>
+
+    <p class="mt-6 font-mono text-[12px] text-mute">↑ static demo. yours fills with your jobs as you crawl.</p>
+  </div>
+</section>
+
+<!-- ============== TRUST / OBJECTIONS ============== -->
+<section id="trust" class="py-28">
+  <div class="max-w-[1240px] mx-auto px-6">
+    <div class="max-w-3xl mb-16">
+      <div class="font-mono text-[11px] uppercase tracking-widest text-amber">/03 · the elephant in the room</div>
+      <h2 class="mt-3 font-serif text-5xl md:text-6xl tracking-tight leading-[1.02]">Yes, we know <span class="italic">exactly</span> what you're thinking.</h2>
+      <p class="mt-6 text-cream2 text-[16px] leading-relaxed max-w-2xl">Auto-applying to jobs sounds like the kind of thing that gets your account banned, your resume blacklisted, or both. We thought hard about each of those. Here's where we landed.</p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-px bg-line2 border hairline2 rounded-xl overflow-hidden">
+
+      <div class="bg-ink p-8">
+        <div class="font-mono text-[11px] text-mute mb-3">CONCERN · 01</div>
+        <h3 class="font-serif text-2xl leading-tight mb-4">"Won't LinkedIn ban me?"</h3>
+        <p class="text-cream2 text-[14px] leading-relaxed">JobCrawler runs inside <em>your</em> Chrome session — same cookies, same fingerprint, same IP as when you browse normally. No headless browser, no proxy, no API abuse. From LinkedIn's side it looks like a logged-in human clicking through Easy Apply slowly. We've run 1.4M applications across 8,000 accounts. Zero bans.</p>
+        <div class="mt-5 flex items-center gap-2 font-mono text-[11px] text-green">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l4 4L19 6"/></svg>
+          0 bans across 1.4M applications
+        </div>
+      </div>
+
+      <div class="bg-ink p-8">
+        <div class="font-mono text-[11px] text-mute mb-3">CONCERN · 02</div>
+        <h3 class="font-serif text-2xl leading-tight mb-4">"What if it applies to a job I'd hate?"</h3>
+        <p class="text-cream2 text-[14px] leading-relaxed">Set a minimum score (default 75). Set a hard blocklist of companies. Set a "review queue" mode where it surfaces matches and you tap to apply. Defaults are conservative on purpose — most users start in review mode for the first 24 hours, then graduate to autopilot once they trust the scoring.</p>
+        <div class="mt-5 flex items-center gap-2 font-mono text-[11px] text-cream2">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          review-mode for the first 24h, by default
+        </div>
+      </div>
+
+      <div class="bg-ink p-8">
+        <div class="font-mono text-[11px] text-mute mb-3">CONCERN · 03</div>
+        <h3 class="font-serif text-2xl leading-tight mb-4">"Where does my data go?"</h3>
+        <p class="text-cream2 text-[14px] leading-relaxed">Your resume and profile sit on our cloud (encrypted, India region). Job descriptions are sent to our scoring API, which forwards them to the LLM with your profile redacted of PII. We never store LinkedIn cookies, never see your password, and you can wipe everything with one button. Source code for the extension is public.</p>
+        <div class="mt-5 flex items-center gap-2 font-mono text-[11px] text-cream2">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-7a2 2 0 00-2-2H6a2 2 0 00-2 2v7a2 2 0 002 2zm10-12V7a4 4 0 00-8 0v4h8z"/></svg>
+          Open-source extension · India-region storage
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Reinforcement strip -->
+    <div class="mt-px grid md:grid-cols-4 gap-px bg-line2 border-x hairline2 border-b hairline2 rounded-b-xl -mt-px overflow-hidden">
+      <div class="bg-ink p-5">
+        <div class="font-mono text-[10px] text-mute uppercase tracking-widest">Stops on</div>
+        <div class="mt-2 text-[14px]">Captcha, login wall, salary mismatch, blocklist hit</div>
+      </div>
+      <div class="bg-ink p-5">
+        <div class="font-mono text-[10px] text-mute uppercase tracking-widest">Throttle</div>
+        <div class="mt-2 text-[14px]">40s–4min per app · randomized</div>
+      </div>
+      <div class="bg-ink p-5">
+        <div class="font-mono text-[10px] text-mute uppercase tracking-widest">Daily cap</div>
+        <div class="mt-2 text-[14px]">Defaults to 50 apps/day · adjustable</div>
+      </div>
+      <div class="bg-ink p-5">
+        <div class="font-mono text-[10px] text-mute uppercase tracking-widest">Kill switch</div>
+        <div class="mt-2 text-[14px]">Cmd+. or close tab — instant</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============== TESTIMONIALS ============== -->
+<section class="border-y hairline bg-ink2/40 py-24">
+  <div class="max-w-[1240px] mx-auto px-6">
+    <div class="font-mono text-[11px] uppercase tracking-widest text-amber mb-2">/04 · what users say</div>
+    <h2 class="font-serif text-4xl md:text-5xl tracking-tight leading-[1.05] max-w-3xl">No more refreshing<br/>LinkedIn at 1AM.</h2>
+
+    <div class="mt-12 grid md:grid-cols-3 gap-5">
+      <figure class="border hairline rounded-xl p-7 bg-ink">
+        <blockquote class="font-serif text-[22px] leading-snug text-balance">"Got 6 interviews in week one. I haven't logged into LinkedIn manually in a month."</blockquote>
+        <figcaption class="mt-6 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-amber/20 flex items-center justify-center font-mono text-[11px] text-amber">PR</div>
+          <div>
+            <div class="text-[13px] font-medium">Priya R.</div>
+            <div class="text-[11px] font-mono text-mute">ML Engineer · Bengaluru</div>
+          </div>
+        </figcaption>
+      </figure>
+      <figure class="border hairline rounded-xl p-7 bg-ink">
+        <blockquote class="font-serif text-[22px] leading-snug text-balance">"I was suspicious. Started in review mode. After 2 days I let it loose. The match scores are scary good."</blockquote>
+        <figcaption class="mt-6 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-green/20 flex items-center justify-center font-mono text-[11px] text-green">AK</div>
+          <div>
+            <div class="text-[13px] font-medium">Arjun K.</div>
+            <div class="text-[11px] font-mono text-mute">Backend Dev · Remote</div>
+          </div>
+        </figcaption>
+      </figure>
+      <figure class="border hairline rounded-xl p-7 bg-ink">
+        <blockquote class="font-serif text-[22px] leading-snug text-balance">"Notice period was 60 days. JobCrawler did the boring part. I just showed up to the calls."</blockquote>
+        <figcaption class="mt-6 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-cream/10 flex items-center justify-center font-mono text-[11px] text-cream">SM</div>
+          <div>
+            <div class="text-[13px] font-medium">Sneha M.</div>
+            <div class="text-[11px] font-mono text-mute">Data Scientist · Hyderabad</div>
+          </div>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============== PRICING ============== -->
+<section id="pricing" class="py-28">
+  <div class="max-w-[1240px] mx-auto px-6">
+    <div class="grid md:grid-cols-[1fr_2fr] gap-12 items-start">
+      <div>
+        <div class="font-mono text-[11px] uppercase tracking-widest text-amber">/05 · pricing</div>
+        <h2 class="mt-3 font-serif text-5xl md:text-6xl tracking-tight leading-[1.02]">One price.<br/><span class="italic">Cancel anytime.</span></h2>
+        <p class="mt-6 text-cream2 text-[15px] leading-relaxed">A single referral bonus from one new job pays for ~5 years of JobCrawler. We did the math.</p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-5">
+        <!-- Free -->
+        <div class="border hairline2 rounded-2xl p-7 bg-ink2/40">
+          <div class="font-mono text-[11px] text-mute uppercase tracking-widest">Trial</div>
+          <div class="mt-4 flex items-baseline gap-2">
+            <span class="font-serif text-6xl">₹0</span>
+            <span class="text-cream2 text-[13px]">/ 7 days</span>
+          </div>
+          <p class="mt-3 text-cream2 text-[13.5px]">Try it on a real job hunt. No card.</p>
+          <ul class="mt-6 space-y-2.5 text-[13.5px] text-cream2">
+            <li class="flex gap-2"><span class="text-green">✓</span> Up to 50 applications</li>
+            <li class="flex gap-2"><span class="text-green">✓</span> All filters &amp; scoring</li>
+            <li class="flex gap-2"><span class="text-green">✓</span> Review-mode &amp; autopilot</li>
+            <li class="flex gap-2"><span class="text-mute">○</span> Email support only</li>
+          </ul>
+          <a href="#install" class="mt-7 inline-flex w-full items-center justify-center h-11 rounded-md border hairline2 text-[14px] font-medium hover:bg-ink2">Start free</a>
+        </div>
+
+        <!-- Pro -->
+        <div class="relative border hairline2 rounded-2xl p-7 bg-gradient-to-b from-[#15110A] to-ink overflow-hidden">
+          <div class="absolute -top-px right-7 px-2.5 py-1 rounded-b-md bg-amber text-ink font-mono text-[10px] uppercase tracking-widest">Recommended</div>
+          <div class="font-mono text-[11px] text-amber uppercase tracking-widest">Pro</div>
+          <div class="mt-4 flex items-baseline gap-2">
+            <span class="font-serif text-6xl">₹499</span>
+            <span class="text-cream2 text-[13px]">/ month</span>
+          </div>
+          <p class="mt-3 text-cream2 text-[13.5px]">Everything. Until you sign your offer letter.</p>
+          <ul class="mt-6 space-y-2.5 text-[13.5px]">
+            <li class="flex gap-2"><span class="text-amber">✓</span> <span>Unlimited applications</span></li>
+            <li class="flex gap-2"><span class="text-amber">✓</span> <span>LLM scoring on every JD</span></li>
+            <li class="flex gap-2"><span class="text-amber">✓</span> <span>Custom screening Q&amp;A answers</span></li>
+            <li class="flex gap-2"><span class="text-amber">✓</span> <span>Multi-resume routing by role</span></li>
+            <li class="flex gap-2"><span class="text-amber">✓</span> <span>Daily summary email</span></li>
+            <li class="flex gap-2"><span class="text-amber">✓</span> <span>Priority support · WhatsApp</span></li>
+          </ul>
+          <a href="#install" class="mt-7 inline-flex w-full items-center justify-center h-11 rounded-md bg-amber text-ink font-semibold text-[14px] hover:bg-amber2">Start 7-day trial →</a>
+          <p class="mt-3 text-center font-mono text-[11px] text-mute">UPI · Card · Net banking</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FAQ ============== -->
+<section id="faq" class="border-t hairline py-28">
+  <div class="max-w-[1240px] mx-auto px-6 grid md:grid-cols-[1fr_2fr] gap-14">
+    <div>
+      <div class="font-mono text-[11px] uppercase tracking-widest text-amber">/06 · faq</div>
+      <h2 class="mt-3 font-serif text-5xl md:text-6xl tracking-tight leading-[1.02]">Real questions.<br/>Honest answers.</h2>
+      <p class="mt-6 text-cream2 text-[14.5px] leading-relaxed">Didn't find yours? <a href="/cdn-cgi/l/email-protection#86eeefc6ece9e4e5f4e7f1eae3f4a8e7f6f6" class="text-amber underline-offset-4 hover:underline"><span class="__cf_email__" data-cfemail="731b1a33191c11100112041f16015d120303">[email&#160;protected]</span></a></p>
+    </div>
+
+    <div class="border-t hairline">
+      <!-- FAQ items -->
+      <details class="border-b hairline group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">Will LinkedIn detect this and ban my account?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>Short answer: no. Long answer: JobCrawler runs inside your real Chrome session — it's a Manifest V3 extension, not a bot. There's no automated browser, no scraped API, no IP rotation. From LinkedIn's perspective, it's you, clicking buttons. We add randomized delays (40s–4min between applications) so the cadence looks human. Across 1.4M applications and 8,000+ accounts, we've never had a single ban. If it ever happens, we refund your year and help you appeal.</p>
+        </div>
+      </details>
+
+      <details class="border-b hairline group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">What if it applies to a job I'd never want?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>You set the minimum match score (we suggest 75/100 for ML and backend roles). You set a company blocklist. You can require a manual tap before any apply — that's "review mode" and we recommend it for the first 24 hours so you can calibrate. The LLM also has hard rules: it won't apply if your stated minimum salary clearly exceeds the JD band, or if seniority is wildly off (no SDE-1 jobs for staff engineers).</p>
+        </div>
+      </details>
+
+      <details class="border-b hairline group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">Does it answer those custom screening questions?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>Yes — for the easy ones (years of experience, notice period, current CTC, expected CTC, work auth) it pulls from your profile. For long-form questions ("Why this role?"), the default behavior is to flag for review and ping you. You can also save canned answers per role family. We will <em>never</em> fabricate work experience or credentials.</p>
+        </div>
+      </details>
+
+      <details class="border-b hairline group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">Where is my resume stored?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>Encrypted at rest in AWS Mumbai (ap-south-1). It's only decrypted in-memory when the extension uploads it to LinkedIn or when scoring needs to read your skills. We don't sell data. We don't share with recruiters. There's a "delete everything" button in Settings that takes 5 seconds and is irreversible.</p>
+        </div>
+      </details>
+
+      <details class="border-b hairline group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">Do you support non-Easy-Apply jobs?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>Not yet. Easy Apply covers ~70% of relevant LinkedIn postings and lets us guarantee submission integrity. External-redirect jobs (Greenhouse, Lever, company portals) are on the roadmap for Q3 2026 — they require per-ATS adapters and a different consent flow.</p>
+        </div>
+      </details>
+
+      <details class="border-b hairline group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">Can I pause or stop a run mid-way?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>One click. Or close the LinkedIn tab. Or hit Cmd/Ctrl + period. Or just put your laptop to sleep. Any of those — and the next run picks up cleanly from where the queue left off.</p>
+        </div>
+      </details>
+
+      <details class="group">
+        <summary class="flex items-center justify-between gap-6 py-6">
+          <span class="font-serif text-2xl text-balance">Why ₹499 and not free?</span>
+          <span class="chev font-mono text-2xl text-cream2">+</span>
+        </summary>
+        <div class="pb-6 text-cream2 text-[14.5px] leading-relaxed max-w-[60ch]">
+          <p>The LLM scoring API isn't free for us — every job-resume pair is roughly ₹0.40 in inference. At 300 jobs/week per active user that's already ~₹150/month before infra and support. ₹499 keeps us small, sustainable, and uninterested in selling your data. If you land a job, you'll cancel — and we're fine with that.</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FINAL CTA ============== -->
+<section id="install" class="border-t hairline relative overflow-hidden">
+  <div class="absolute inset-0 grid-bg opacity-30"></div>
+  <div class="absolute inset-0" style="background: radial-gradient(50% 80% at 50% 100%, rgba(255,138,31,0.18), transparent 60%);"></div>
+  <div class="relative max-w-[1240px] mx-auto px-6 py-28 text-center">
+    <div class="font-mono text-[11px] uppercase tracking-widest text-amber">/07 · install</div>
+    <h2 class="mt-4 font-serif text-6xl md:text-[88px] leading-[0.95] tracking-tight text-balance max-w-[16ch] mx-auto">
+      Stop applying. <span class="italic text-amber">Start interviewing.</span>
+    </h2>
+    <p class="mt-7 max-w-xl mx-auto text-cream2 text-[16px] leading-relaxed">Add the extension. Set up your profile. Hit Crawl. Wake up to a calendar that fills itself.</p>
+
+    <div class="mt-9 inline-flex flex-col items-center gap-3">
+      <a href="#" class="inline-flex items-center gap-2.5 h-14 px-7 rounded-md bg-amber text-ink text-[16px] font-semibold hover:bg-amber2 transition">
+        <svg viewBox="0 0 24 24" class="w-5 h-5" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 4l4.3 7.4H7.7L12 6z"/></svg>
+        Add to Chrome — start free
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+      <p class="font-mono text-[12px] text-mute">7 days free · ₹499/mo after · cancel from settings</p>
+    </div>
+
+    <!-- system-status pill -->
+    <div class="mt-12 inline-flex items-center gap-3 border hairline2 rounded-full px-4 py-2 font-mono text-[11px] text-cream2">
+      <span class="w-1.5 h-1.5 rounded-full bg-green blink"></span>
+      <span>API operational</span>
+      <span class="text-mute">·</span>
+      <span>p50 score latency 412ms</span>
+      <span class="text-mute">·</span>
+      <span>build a8f2c · 4h ago</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FOOTER ============== -->
+<footer class="border-t hairline">
+  <div class="max-w-[1240px] mx-auto px-6 py-14 grid md:grid-cols-5 gap-10">
+    <div class="md:col-span-2">
+      <div class="flex items-center gap-2.5">
+        <span class="relative w-7 h-7 inline-flex items-center justify-center">
+          <span class="absolute inset-0 rounded-md border hairline2"></span>
+          <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7">
+            <circle cx="12" cy="12" r="3.2" class="text-amber" stroke="currentColor"/>
+            <path d="M12 8.8V4M12 15.2V20M8.8 12H4M15.2 12H20M9.7 9.7L6.3 6.3M14.3 9.7L17.7 6.3M9.7 14.3L6.3 17.7M14.3 14.3L17.7 17.7" class="text-cream"/>
+          </svg>
+        </span>
+        <span class="font-semibold tracking-tight">JobCrawler</span>
+      </div>
+      <p class="mt-4 max-w-sm text-cream2 text-[13.5px] leading-relaxed">Built by ex-Flipkart and ex-Razorpay engineers in Bengaluru, for the people who once sat next to us pasting the same cover letter into the 40th portal of the day.</p>
+      <div class="mt-5 font-mono text-[11px] text-mute">© 2026 Crawler Labs Pvt. Ltd. · Bengaluru, India</div>
+    </div>
+    <div>
+      <div class="font-mono text-[10px] uppercase tracking-widest text-mute mb-3">Product</div>
+      <ul class="space-y-2 text-[13.5px] text-cream2">
+        <li><a href="#how" class="hover:text-cream">How it works</a></li>
+        <li><a href="#demo" class="hover:text-cream">Live demo</a></li>
+        <li><a href="#pricing" class="hover:text-cream">Pricing</a></li>
+        <li><a href="#changelog" class="hover:text-cream">Changelog</a></li>
+      </ul>
+    </div>
+    <div>
+      <div class="font-mono text-[10px] uppercase tracking-widest text-mute mb-3">Trust</div>
+      <ul class="space-y-2 text-[13.5px] text-cream2">
+        <li><a href="#" class="hover:text-cream">Security</a></li>
+        <li><a href="#" class="hover:text-cream">Privacy</a></li>
+        <li><a href="#" class="hover:text-cream">Open source</a></li>
+        <li><a href="#" class="hover:text-cream">Status</a></li>
+      </ul>
+    </div>
+    <div>
+      <div class="font-mono text-[10px] uppercase tracking-widest text-mute mb-3">Contact</div>
+      <ul class="space-y-2 text-[13.5px] text-cream2">
+        <li><a href="/cdn-cgi/l/email-protection#96feffd6fcf9f4f5e4f7e1faf3e4b8f7e6e6" class="hover:text-cream"><span class="__cf_email__" data-cfemail="81e9e8c1ebeee3e2f3e0f6ede4f3afe0f1f1">[email&#160;protected]</span></a></li>
+        <li><a href="#" class="hover:text-cream">WhatsApp support</a></li>
+        <li><a href="#" class="hover:text-cream">Twitter / X</a></li>
+        <li><a href="#" class="hover:text-cream">GitHub</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="border-t hairline">
+    <div class="max-w-[1240px] mx-auto px-6 py-5 flex flex-wrap items-center justify-between gap-3 font-mono text-[11px] text-mute">
+      <div>not affiliated with linkedin corporation. linkedin is a registered trademark of linkedin corporation.</div>
+      <div class="flex items-center gap-4">
+        <span>SOC 2 (in progress)</span>
+        <span>·</span>
+        <span>DPDP-aligned</span>
+        <span>·</span>
+        <span>v1.4.2</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script></body>
+</html>

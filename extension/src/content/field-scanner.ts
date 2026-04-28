@@ -169,6 +169,9 @@ export function scanFields(root: Document | Element): ApiField[] {
   function addField(field: ApiField): void {
     if (!field.label) return;
     if (seenLabels.has(field.label)) return; // dedup by label, keep first
+    // Skip LinkedIn's resume-selector checkboxes ("Deselect resume X.pdf", "Select resume X.pdf")
+    const lc = field.label.toLowerCase();
+    if (lc.startsWith("deselect ") || lc.startsWith("select resume")) return;
     seenLabels.add(field.label);
     results.push(field);
   }

@@ -51,6 +51,10 @@ class Application(Base):
         String(30), default="scored", nullable=False, index=True
     )
 
+    # ── Discovery metadata ────────────────────────────────────────────────────
+    source: Mapped[str] = mapped_column(String(50), default="manual", nullable=False)  # "manual" | "linkedin_extension"
+    discovery_batch_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # groups jobs from same session
+
     # ── ATS metadata ──────────────────────────────────────────────────────────
     ats_type: Mapped[str | None] = mapped_column(String(50))      # linkedin / greenhouse / lever / indeed
     difficulty: Mapped[str | None] = mapped_column(String(20))    # easy / medium / hard

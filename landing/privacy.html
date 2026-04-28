@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — JobCrawler</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-white text-gray-900 font-sans antialiased">
+
+  <nav class="border-b border-gray-200 px-4 sm:px-6 py-4">
+    <div class="max-w-3xl mx-auto flex items-center justify-between">
+      <a href="index.html" class="font-bold text-lg tracking-tight text-gray-950">JobCrawler</a>
+      <a href="index.html" class="text-sm text-gray-500 hover:text-gray-900 transition-colors">&larr; Back to home</a>
+    </div>
+  </nav>
+
+  <main class="max-w-3xl mx-auto px-4 sm:px-6 py-16">
+    <h1 class="text-4xl font-extrabold mb-2">Privacy Policy</h1>
+    <p class="text-gray-500 text-sm mb-12">Last updated: April 10, 2026</p>
+
+    <div class="prose prose-gray max-w-none space-y-10 text-gray-700 leading-relaxed">
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">1. Who we are</h2>
+        <p>
+          JobCrawler ("we", "us", "our") is an AI-powered job application tool consisting of a Chrome extension and a cloud API. Our contact email for privacy matters is <a href="mailto:privacy@jobcrawler.app" class="text-indigo-600 hover:underline">privacy@jobcrawler.app</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">2. What data we collect</h2>
+        <h3 class="font-semibold text-gray-900 mb-1">Account data</h3>
+        <p>When you register, we collect your <strong>email address</strong> and a <strong>hashed password</strong>. We never store your password in plain text.</p>
+
+        <h3 class="font-semibold text-gray-900 mt-4 mb-1">Profile data</h3>
+        <p>To fill job application forms, you provide a profile containing information such as your name, phone number, educational background, work experience, skills, preferred roles, and Equal Employment Opportunity (EEO) data. This data is stored in our database and used solely to fill forms on your behalf.</p>
+
+        <h3 class="font-semibold text-gray-900 mt-4 mb-1">Job application data</h3>
+        <p>We store metadata about jobs you apply to: company name, job title, URL, fit score, application status, and the answers generated for each form. This lets you track your applications within the extension.</p>
+
+        <h3 class="font-semibold text-gray-900 mt-4 mb-1">Usage data</h3>
+        <p>We log API calls (endpoint, timestamp, token count) to enforce rate limits and generate aggregate usage statistics. Logs do not contain the full content of your profile or answers.</p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">3. What we do NOT collect</h2>
+        <ul class="list-disc list-inside space-y-1">
+          <li>Your LinkedIn, Indeed, or Greenhouse <strong>password or session cookies</strong>.</li>
+          <li>Your <strong>browsing history</strong> outside of LinkedIn job pages (<code class="text-xs bg-gray-100 px-1 py-0.5 rounded">linkedin.com/jobs/*</code>).</li>
+          <li>Financial information — payments are processed entirely by Razorpay and we never see your card details.</li>
+          <li>Device identifiers, location, or any biometric data.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">4. How we use your data</h2>
+        <ul class="list-disc list-inside space-y-1">
+          <li><strong>Form filling:</strong> Your profile is sent to our API to generate answers for job application fields.</li>
+          <li><strong>Job scoring:</strong> Job descriptions are compared against your profile to produce a fit score.</li>
+          <li><strong>Application tracking:</strong> We store the outcome of each application so you can review your history.</li>
+          <li><strong>Service improvement:</strong> Aggregate, anonymized usage statistics help us improve answer quality.</li>
+        </ul>
+        <p class="mt-3">We do not sell your data. We do not use your data for advertising.</p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">5. Third-party services</h2>
+        <h3 class="font-semibold text-gray-900 mb-1">LLM providers</h3>
+        <p>
+          To generate form answers and cover letters, we send form questions (e.g., "Years of Python experience?") and relevant profile fields to our LLM providers — currently <strong>Groq</strong> and <strong>OpenRouter</strong>. We do not send your full profile verbatim; only the fields relevant to each question are included. These providers process data according to their own privacy policies.
+        </p>
+        <h3 class="font-semibold text-gray-900 mt-4 mb-1">Razorpay (payments)</h3>
+        <p>
+          Payments are processed by Razorpay. We receive a payment confirmation and order ID. We never see or store your card number, bank account, or UPI details.
+        </p>
+        <h3 class="font-semibold text-gray-900 mt-4 mb-1">Hosting</h3>
+        <p>Our API is hosted on Railway. The database is hosted on a PostgreSQL instance within the same cloud region. All data is encrypted in transit (TLS) and at rest.</p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">6. Data retention</h2>
+        <p>
+          We retain your account and profile data for as long as your account is active. Application records are retained for 2 years to allow you to review your job search history.
+        </p>
+        <p class="mt-2">
+          When you delete your account, all personal data — including your profile, application history, and usage logs — is permanently deleted within 30 days.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">7. Your rights (GDPR / DPDP)</h2>
+        <p>Depending on your jurisdiction, you have the right to:</p>
+        <ul class="list-disc list-inside space-y-1 mt-2">
+          <li><strong>Access:</strong> Request a copy of all personal data we hold about you.</li>
+          <li><strong>Rectification:</strong> Correct inaccurate or incomplete profile data.</li>
+          <li><strong>Erasure:</strong> Request deletion of your account and all associated data.</li>
+          <li><strong>Portability:</strong> Receive your profile data in a machine-readable format (JSON).</li>
+          <li><strong>Objection:</strong> Object to processing for legitimate interests.</li>
+        </ul>
+        <p class="mt-3">
+          To exercise any of these rights, email <a href="mailto:privacy@jobcrawler.app" class="text-indigo-600 hover:underline">privacy@jobcrawler.app</a>. We will respond within 30 days.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">8. Security</h2>
+        <p>
+          Passwords are hashed with bcrypt. All API traffic is encrypted via TLS. JWT tokens are short-lived (24 hours) with rotating refresh tokens. Our production environment enforces strict origin checks — only requests from the Chrome extension and our official frontend are accepted.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">9. Changes to this policy</h2>
+        <p>
+          We may update this policy from time to time. Material changes will be communicated via email to registered users at least 14 days before taking effect. The "Last updated" date at the top of this page will always reflect the current version.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">10. Contact</h2>
+        <p>
+          Questions or data requests: <a href="mailto:privacy@jobcrawler.app" class="text-indigo-600 hover:underline">privacy@jobcrawler.app</a>
+        </p>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="border-t border-gray-200 px-4 sm:px-6 py-8 mt-16">
+    <div class="max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-400">
+      <span class="font-bold text-gray-950">JobCrawler</span>
+      <div class="flex gap-6">
+        <a href="index.html" class="hover:text-gray-700 transition-colors">Home</a>
+        <a href="mailto:support@jobcrawler.app" class="hover:text-gray-700 transition-colors">Contact</a>
+      </div>
+      <p class="text-xs">&copy; 2026 JobCrawler. All rights reserved.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

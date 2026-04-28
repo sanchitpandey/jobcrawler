@@ -3,6 +3,8 @@ import type {
   AuthToken,
   FillRequest,
   FillResponse,
+  QueueItem,
+  RawJob,
   ScoreRequest,
   ScoreResponse,
   TrackJobPayload,
@@ -10,7 +12,10 @@ import type {
   UpdateStatusPayload,
 } from "../types/index.js";
 
-export const API_BASE = "http://localhost:8000";
+// API_BASE_URL is injected at build time via esbuild define.
+// Set API_URL=https://api.jobcrawler.app before running `npm run build` for production.
+declare const API_BASE_URL: string;
+export const API_BASE = API_BASE_URL;
 
 // ── JWT helpers ───────────────────────────────────────────────────────────────
 
@@ -280,6 +285,147 @@ export async function getBillingStatus(): Promise<BillingStatusResponse> {
     throw new Error(`getBillingStatus failed: ${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<BillingStatusResponse>;
+}
+
+// ── Discovery ─────────────────────────────────────────────────────────────────
+
+export interface DiscoveryIngestResponse {
+  ingested: number;
+  filtered_count: number;
+  needs_enrichment: string[];
+}
+
+export interface DiscoveryScoreResponse {
+  scored: number;
+  auto_approved: number;
+  needs_review: number;
+}
+
+export async function discoveryIngest(
+  jobs: RawJob[],
+  source: string,
+): Promise<DiscoveryIngestResponse> {
+  const response = await fetchWithAuth("/discovery/ingest", { jobs, source });
+  if (!response.ok) {
+    throw new Error(`discoveryIngest failed: ${response.status}`);
+  }
+  return response.json() as Promise<DiscoveryIngestResponse>;
+}
+
+export async function discoveryEnrich(
+  linkedin_job_id: string,
+  description: string,
+  applicant_count: string,
+): Promise<{ ok: boolean }> {
+  const response = await fetchWithAuth("/discovery/enrich", {
+    linkedin_job_id,
+    description,
+    applicant_count,
+  });
+  if (!response.ok) {
+    throw new Error(`discoveryEnrich failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ ok: boolean }>;
+}
+
+export async function discoveryScoreBatch(): Promise<DiscoveryScoreResponse> {
+  const response = await fetchWithAuth("/discovery/score-batch", {});
+  if (!response.ok) {
+    throw new Error(`discoveryScoreBatch failed: ${response.status}`);
+  }
+  return response.json() as Promise<DiscoveryScoreResponse>;
+}
+
+export interface DiscoveryQueueResponse {
+  queue: QueueItem[];
+}
+
+export async function getDiscoveryQueue(
+  limit = 15,
+  status = "approved",
+): Promise<DiscoveryQueueResponse> {
+  const response = await fetchWithAuth(
+    `/discovery/queue?status=${encodeURIComponent(status)}&limit=${limit}`,
+    undefined,
+    "GET",
+  );
+  if (!response.ok) {
+    throw new Error(`getDiscoveryQueue failed: ${response.status}`);
+  }
+  return response.json() as Promise<DiscoveryQueueResponse>;
+}
+
+export async function approveBatch(minScore: number): Promise<{ approved: number }> {
+  const response = await fetchWithAuth("/discovery/approve-batch", { min_score: minScore });
+  if (!response.ok) {
+    throw new Error(`approveBatch failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ approved: number }>;
+}
+
+export async function patchDiscoveryStatus(
+  appId: string,
+  status: string,
+  filledFields?: Record<string, string>,
+): Promise<void> {
+  const response = await fetchWithAuth(
+    `/discovery/${encodeURIComponent(appId)}/status`,
+    { status, filled_fields_json: filledFields },
+    "PATCH",
+  );
+  if (!response.ok) {
+    throw new Error(`patchDiscoveryStatus failed: ${response.status}`);
+  }
+}
+
+// ── Discovery stats & preferences ────────────────────────────────────────────
+
+export interface DiscoveryStats {
+  applied_today: number;
+  applied_week: number;
+  queue_approved: number;
+  scored_needs_review: number;
+}
+
+export interface SearchPreferencePayload {
+  keywords: string[] | null;
+  location: string;
+  experience_levels: string;
+  remote_filter: string;
+  time_range: string;
+  auto_apply_threshold: number;
+  max_daily_applications: number;
+}
+
+export interface SearchPreferenceResponse extends SearchPreferencePayload {
+  id: string;
+}
+
+export async function getDiscoveryStats(): Promise<DiscoveryStats> {
+  const response = await fetchWithAuth("/discovery/stats", undefined, "GET");
+  if (!response.ok) {
+    throw new Error(`getDiscoveryStats failed: ${response.status}`);
+  }
+  return response.json() as Promise<DiscoveryStats>;
+}
+
+export async function getSearchPreferences(): Promise<SearchPreferenceResponse | null> {
+  const response = await fetchWithAuth("/discovery/preferences", undefined, "GET");
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`getSearchPreferences failed: ${response.status}`);
+  }
+  return response.json() as Promise<SearchPreferenceResponse>;
+}
+
+export async function saveSearchPreferences(
+  pref: SearchPreferencePayload,
+): Promise<SearchPreferenceResponse> {
+  const response = await fetchWithAuth("/discovery/preferences", pref);
+  if (!response.ok) {
+    throw new Error(`saveSearchPreferences failed: ${response.status}`);
+  }
+  return response.json() as Promise<SearchPreferenceResponse>;
 }
 
 export async function getUsage(): Promise<UsageResponse> {

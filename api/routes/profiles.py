@@ -149,6 +149,11 @@ class ProfileResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProfileCompletenessResponse(BaseModel):
+    complete: bool
+    missing_fields: list[str]
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _profile_to_response(profile: Profile) -> ProfileResponse:
@@ -219,6 +224,32 @@ def _apply_payload(profile: Profile, payload: ProfilePayload) -> None:
         profile.eeo_json = {**(profile.eeo_json or {}), **payload.eeo}
     if payload.short_answers is not None:
         profile.short_answers_json = {**(profile.short_answers_json or {}), **payload.short_answers}
+
+
+def _profile_missing_fields(profile: Profile | None) -> list[str]:
+    """Return the required fields that must be present before discovery."""
+    if profile is None:
+        return [
+            "name",
+            "email",
+            "phone",
+            "skills_json",
+            "degree",
+            "college",
+            "graduation_year",
+        ]
+
+    missing: list[str] = []
+    required_scalars = ("name", "email", "phone", "degree", "college", "graduation_year")
+    for field in required_scalars:
+        value = getattr(profile, field, None)
+        if value is None or not str(value).strip():
+            missing.append(field)
+
+    if not profile.skills_json:
+        missing.append("skills_json")
+
+    return missing
 
 
 # ── Markdown import ────────────────────────────────────────────────────────────
@@ -353,6 +384,20 @@ async def get_profile(
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
     return _profile_to_response(profile)
+
+
+@router.get("/completeness", response_model=ProfileCompletenessResponse)
+async def get_profile_completeness(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileCompletenessResponse:
+    result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
+    profile = result.scalar_one_or_none()
+    missing_fields = _profile_missing_fields(profile)
+    return ProfileCompletenessResponse(
+        complete=not missing_fields,
+        missing_fields=missing_fields,
+    )
 
 
 @router.post("", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED)

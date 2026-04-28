@@ -37,7 +37,10 @@ async function loadHandler(platform: string): Promise<SiteHandler | null> {
 
 chrome.runtime.onMessage.addListener((message: Message): void => {
   if (message.type === "SHOW_SCORE") {
-    showOverlay(message.payload);
+    // Suppress score overlay in batch mode — no user is watching.
+    chrome.storage.local.get("batchMode").then(({ batchMode }) => {
+      if (!batchMode) showOverlay(message.payload);
+    }).catch(() => undefined);
   }
 });
 
