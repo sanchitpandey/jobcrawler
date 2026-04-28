@@ -195,7 +195,7 @@ export class AutoApplyOrchestrator {
         consecutiveFailures = 0;
         lastError = undefined;
       } else if (result.success) {
-        patchDiscoveryStatus(job.id, "applied", result.filledFields).catch(() => undefined);
+        await patchDiscoveryStatus(job.id, "applied", result.filledFields).catch(() => undefined);
         applied++;
         consecutiveFailures = 0;
         lastError = undefined;

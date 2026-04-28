@@ -16,6 +16,7 @@ const esmOptions = {
     popup: "src/popup/popup.ts",
     overlay: "src/overlay/overlay.ts",
     checkout: "src/checkout/checkout.ts",
+    offscreen: "src/offscreen/offscreen.ts",
   },
   define: {
     API_BASE_URL: JSON.stringify(
@@ -35,7 +36,6 @@ const iifeOptions = {
   logLevel: "info",
   entryPoints: {
     content: "src/content/orchestrator.ts",
-    "content/discovery-scraper": "src/content/discovery-scraper.ts",
     "content/job-page-scraper": "src/content/job-page-scraper.ts",
   },
   define: {

@@ -1,43 +1,127 @@
 import {
   discoveryIngest,
-  discoveryEnrich,
+  discoveryEnrichBatch,
   discoveryScoreBatch,
 } from "../utils/api-client.js";
 import type { DiscoveryConfig, RawJob } from "../types/index.js";
 
 const KEEPALIVE_ALARM = "discovery-keepalive";
-const PAGE_SCRAPE_TIMEOUT_MS = 3 * 60 * 1000;   // 3 minutes per page
-const ENRICHMENT_DELAY_MIN_MS = 2000;
-const ENRICHMENT_DELAY_MAX_MS = 5000;
-const TAB_EXTRA_DELAY_MIN_MS = 2000;
-const TAB_EXTRA_DELAY_MAX_MS = 3000;
-const MAX_PAGES_PER_KEYWORD = 40;  // 40 pages × 25 = 1000 results
-const FULL_PAGE_THRESHOLD = 20;    // if ≥20 results, assume more pages exist
+const SEARCH_BASE = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search";
+const POSTING_BASE = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting";
+const MAX_PAGES_PER_KEYWORD = 40;
+const FETCH_DELAY_MIN = 300;
+const FETCH_DELAY_MAX = 500;
+const RATE_LIMIT_WAIT_SEARCH = 5_000;
+const RATE_LIMIT_WAIT_ENRICH = 10_000;
+const ENRICH_BATCH_SIZE = 50;
+const DESCRIPTION_MAX_CHARS = 5_000;
 
-const MAX_RATE_LIMITS = 3;
-const RATE_LIMIT_PAUSE_MS = 5 * 60 * 1000; // 5 minutes
+// ── HTML parsing helpers ──────────────────────────────────────────────────────
 
-interface ScrapeResult {
-  jobs: RawJob[];
-  rateLimited: boolean;
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
+
+// Finds the first element with markerClass as a CSS class, then extracts its text content.
+function extractTextNear(html: string, markerClass: string): string {
+  const pattern = new RegExp(`class="[^"]*${markerClass}[^"]*"`, "i");
+  const match = pattern.exec(html);
+  if (!match) return "";
+  const tagStart = html.lastIndexOf("<", match.index);
+  if (tagStart === -1) return "";
+  const chunk = html.slice(tagStart, tagStart + 500);
+  return stripHtml(chunk).slice(0, 200);
+}
+
+// The guest search API returns a sequence of <li> elements.
+// Split on <li to get one chunk per card, extract fields via regex.
+function parseJobCards(html: string): RawJob[] {
+  const jobs: RawJob[] = [];
+  const seen = new Set<string>();
+
+  const parts = html.split(/<li[\s>]/);
+
+  for (let i = 1; i < parts.length; i++) {
+    const card = parts[i];
+
+    // Primary: data-entity-urn="urn:li:jobPosting:4394771146" — present on every card div
+    const urnMatch = card.match(/data-entity-urn="urn:li:jobPosting:(\d+)"/);
+    // Fallback: extract trailing numeric ID from slug URL /jobs/view/some-title-12345678?
+    const slugMatch = card.match(/\/jobs\/view\/[^?"]*?-(\d{7,})[?"]/);
+
+    const jobId = (urnMatch ?? slugMatch)?.[1];
+    if (!jobId) continue;
+    if (seen.has(jobId)) continue;
+    seen.add(jobId);
+
+    const titleMatch = card.match(
+      /<h3[^>]*base-search-card__title[^>]*>([\s\S]*?)<\/h3>/i,
+    );
+    const companyMatch = card.match(
+      /<h4[^>]*base-search-card__subtitle[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i,
+    );
+    const locationMatch = card.match(/job-search-card__location[^>]*>\s*([^<]+)/i);
+    const postedMatch = card.match(/<time[^>]*datetime="([^"]+)"/i);
+    const isEasyApply = /easy apply/i.test(card);
+
+    jobs.push({
+      linkedin_job_id: jobId,
+      title: titleMatch ? stripHtml(titleMatch[1]) : "",
+      company: companyMatch ? stripHtml(companyMatch[1]) : "",
+      location: locationMatch ? locationMatch[1].trim() : "",
+      url: `https://www.linkedin.com/jobs/view/${jobId}/`,
+      posted_text: postedMatch ? postedMatch[1] : "",
+      is_easy_apply: isEasyApply,
+      applicant_count: "",
+    });
+  }
+
+  return jobs;
+}
+
+// The jobPosting endpoint returns a full HTML page.
+// Extract the description text from known content containers.
+function parseJobDescription(html: string): string {
+  const markers = ["show-more-less-html__markup", "description__text"];
+
+  for (const marker of markers) {
+    const pattern = new RegExp(`class="[^"]*${marker}[^"]*"`, "i");
+    const match = pattern.exec(html);
+    if (!match) continue;
+    const tagStart = html.lastIndexOf("<", match.index);
+    if (tagStart === -1) continue;
+    const chunk = html.slice(tagStart, tagStart + 8000);
+    const text = stripHtml(chunk);
+    if (text.length > 50) return text.slice(0, DESCRIPTION_MAX_CHARS);
+  }
+
+  return "";
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
 
 class DiscoveryOrchestrator {
   private running = false;
-  private rateLimitCount = 0;
 
   async start(config: DiscoveryConfig): Promise<void> {
     if (this.running) return;
     this.running = true;
-    this.rateLimitCount = 0;
-
     this.startKeepalive();
     this.persistStatus({ phase: "discovering", progress: 0, total: 0 });
 
     try {
       await this.runDiscovery(config);
     } catch (err) {
-      this.persistStatus({ phase: "error", error: String(err) });
+      this.broadcastStatus({ phase: "error", error: String(err) });
     } finally {
       this.running = false;
       this.stopKeepalive();
@@ -49,80 +133,72 @@ class DiscoveryOrchestrator {
   }
 
   private async runDiscovery(config: DiscoveryConfig): Promise<void> {
+    console.log("[discovery] starting with config:", JSON.stringify(config));
     const allRawJobs: RawJob[] = [];
 
-    for (let ki = 0; ki < config.keywords.length; ki++) {
+    if (config.keywords.length === 0) {
+      console.warn("[discovery] no keywords in config — nothing to search");
+      this.broadcastStatus({ phase: "complete", discovered: 0, filtered: 0, scored: 0, approved: 0, needsReview: 0 });
+      return;
+    }
+
+    // Split comma-separated location string into individual locations.
+    // User may enter "bengaluru, pune, remote" — we run a separate search per location.
+    const locations = config.location
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const effectiveLocations = locations.length > 0 ? locations : [""];
+
+    // Build all keyword × location combinations
+    const searches: Array<{ keyword: string; location: string }> = [];
+    for (const keyword of config.keywords) {
+      for (const location of effectiveLocations) {
+        searches.push({ keyword, location });
+      }
+    }
+
+    // Phase 1: Fetch search result pages via guest API
+    for (let si = 0; si < searches.length; si++) {
       if (!this.running) break;
+      const { keyword, location } = searches[si];
 
-      const keyword = config.keywords[ki];
-      this.broadcastStatus({
-        phase: "discovering",
-        progress: ki,
-        total: config.keywords.length,
-        discovered: this.dedup(allRawJobs).length,
-      });
+      for (let page = 0; page < MAX_PAGES_PER_KEYWORD; page++) {
+        if (!this.running) break;
 
-      const baseUrl = this.buildSearchUrl(keyword, config);
-      const tab = await chrome.tabs.create({ url: baseUrl, active: false });
-      const tabId = tab.id!;
+        const params = new URLSearchParams({
+          keywords: keyword,
+          location,
+          f_TPR: config.timeRange,
+          sortBy: "DD",
+          start: String(page * 25),
+        });
+        if (config.experienceLevels) params.set("f_E", config.experienceLevels);
+        if (config.remoteFilter) params.set("f_WT", config.remoteFilter);
+        // NOTE: f_EA is unsupported on the guest API; Easy Apply is detected from card HTML.
 
-      try {
-        for (let page = 0; page < MAX_PAGES_PER_KEYWORD; page++) {
-          if (!this.running) break;
+        const html = await this.fetchWithRetry(
+          `${SEARCH_BASE}?${params.toString()}`,
+          RATE_LIMIT_WAIT_SEARCH,
+        );
 
-          if (page > 0) {
-            await chrome.tabs.update(tabId, { url: `${baseUrl}&start=${page * 25}` });
-          }
+        if (html === null) break; // rate-limited after retry or network error
 
-          await this.waitForTabLoad(tabId);
+        const jobs = parseJobCards(html);
+        console.log(`[discovery] "${keyword}" @ "${location}" page=${page} → ${jobs.length} cards`);
+        allRawJobs.push(...jobs);
 
-          let { jobs, rateLimited } = await this.runDiscoveryScrape(tabId);
+        const uniqueCount = this.dedup(allRawJobs).length;
+        this.broadcastStatus({
+          phase: "discovering",
+          progress: si,
+          total: searches.length,
+          discovered: uniqueCount,
+          message: `Searching "${keyword}" in ${location || "all locations"}... found ${uniqueCount} jobs`,
+        });
 
-          if (rateLimited) {
-            this.rateLimitCount++;
-
-            if (this.rateLimitCount >= MAX_RATE_LIMITS) {
-              this.broadcastStatus({
-                phase: "error",
-                error: "LinkedIn rate limit detected 3 times. Stopping to protect your account.",
-              });
-              this.running = false;
-              return;
-            }
-
-            this.broadcastStatus({
-              phase: "discovering",
-              progress: ki,
-              total: config.keywords.length,
-              discovered: this.dedup(allRawJobs).length,
-              error: `Rate limited by LinkedIn. Pausing 5 min (${this.rateLimitCount}/${MAX_RATE_LIMITS})…`,
-            });
-
-            await this.randomDelay(RATE_LIMIT_PAUSE_MS, RATE_LIMIT_PAUSE_MS);
-            if (!this.running) break;
-
-            // Retry the same page once after the pause.
-            const retryUrl = page > 0 ? `${baseUrl}&start=${page * 25}` : baseUrl;
-            await chrome.tabs.update(tabId, { url: retryUrl });
-            await this.waitForTabLoad(tabId);
-            const retryResult = await this.runDiscoveryScrape(tabId);
-            jobs = retryResult.jobs;
-            // Don't re-check rateLimited on retry — just use whatever was returned.
-          }
-
-          allRawJobs.push(...jobs);
-
-          this.broadcastStatus({
-            phase: "discovering",
-            progress: ki,
-            total: config.keywords.length,
-            discovered: this.dedup(allRawJobs).length,
-          });
-
-          if (jobs.length < FULL_PAGE_THRESHOLD) break;
-        }
-      } finally {
-        await chrome.tabs.remove(tabId).catch(() => undefined);
+        if (jobs.length === 0) break; // end of results for this search
+        await this.randomDelay(FETCH_DELAY_MIN, FETCH_DELAY_MAX);
       }
     }
 
@@ -132,9 +208,8 @@ class DiscoveryOrchestrator {
 
     this.broadcastStatus({
       phase: "filtering",
-      progress: 0,
-      total: uniqueJobs.length,
       discovered: uniqueJobs.length,
+      message: `Filtering ${uniqueJobs.length} jobs...`,
     });
 
     const ingestResult = await discoveryIngest(uniqueJobs, "linkedin_extension");
@@ -146,16 +221,18 @@ class DiscoveryOrchestrator {
       total: needsEnrichment.length,
       discovered: uniqueJobs.length,
       filtered: ingestResult.filtered_count,
+      message: `Getting details... 0/${needsEnrichment.length}`,
     });
 
+    // Phase 2: Enrich via jobPosting endpoint in batches
     await this.enrichJobs(needsEnrichment, uniqueJobs.length, ingestResult.filtered_count);
 
     if (!this.running) return;
 
     this.broadcastStatus({
       phase: "scoring",
-      progress: 0,
       total: needsEnrichment.length,
+      message: `Scoring ${needsEnrichment.length} jobs...`,
     });
 
     const scoreResult = await discoveryScoreBatch();
@@ -164,13 +241,11 @@ class DiscoveryOrchestrator {
       type: "discovery_status",
       phase: "complete",
       discovered: uniqueJobs.length,
-      filtered: ingestResult.ingested,       // jobs that survived the filter
+      filtered: ingestResult.ingested,
       scored: scoreResult.scored,
       approved: scoreResult.auto_approved,
       needsReview: scoreResult.needs_review,
     };
-
-    // Broadcast to any open popup and persist so reopening the popup shows READY.
     chrome.runtime.sendMessage(completeStatus).catch(() => undefined);
     chrome.storage.local.set({ discoveryStatus: completeStatus }).catch(() => undefined);
   }
@@ -180,28 +255,30 @@ class DiscoveryOrchestrator {
     discovered: number,
     filtered: number,
   ): Promise<void> {
+    type EnrichItem = {
+      linkedin_job_id: string;
+      description: string;
+      title: string;
+      company: string;
+    };
+    const batch: EnrichItem[] = [];
+
     for (let i = 0; i < jobIds.length; i++) {
       if (!this.running) break;
 
       const jobId = jobIds[i];
-      const url = `https://www.linkedin.com/jobs/view/${jobId}/`;
+      const html = await this.fetchWithRetry(
+        `${POSTING_BASE}/${jobId}`,
+        RATE_LIMIT_WAIT_ENRICH,
+      );
 
-      const tab = await chrome.tabs.create({ url, active: false });
-      const tabId = tab.id!;
-
-      try {
-        await this.waitForTabLoad(tabId);
-        const details = await this.extractJobDetails(tabId);
-
-        // Always enrich even if description is empty — marks job as enriched
-        // so score-batch can still score it on title/company alone.
-        await discoveryEnrich(
-          jobId,
-          details?.description ?? "",
-          details?.applicant_count ?? "",
-        ).catch(() => undefined);
-      } finally {
-        await chrome.tabs.remove(tabId).catch(() => undefined);
+      if (html !== null) {
+        batch.push({
+          linkedin_job_id: jobId,
+          description: parseJobDescription(html),
+          title: extractTextNear(html, "top-card-layout__title"),
+          company: extractTextNear(html, "topcard__org-name-link"),
+        });
       }
 
       this.broadcastStatus({
@@ -210,128 +287,117 @@ class DiscoveryOrchestrator {
         total: jobIds.length,
         discovered,
         filtered,
+        message: `Getting details... ${i + 1}/${jobIds.length}`,
       });
 
-      await this.randomDelay(ENRICHMENT_DELAY_MIN_MS, ENRICHMENT_DELAY_MAX_MS);
+      if (batch.length >= ENRICH_BATCH_SIZE || i === jobIds.length - 1) {
+        if (batch.length > 0) {
+          await discoveryEnrichBatch(batch).catch(() => undefined);
+          batch.length = 0;
+        }
+      }
+
+      await this.randomDelay(FETCH_DELAY_MIN, FETCH_DELAY_MAX);
     }
   }
 
-  // Sends 'start_discovery_scrape' and waits for 'discovery_page_complete'.
-  // Also handles tab closure (user closes background tab) and rate-limit flag.
-  private runDiscoveryScrape(tabId: number): Promise<ScrapeResult> {
-    return new Promise((resolve) => {
-      const cleanup = (): void => {
-        clearTimeout(timer);
-        chrome.runtime.onMessage.removeListener(listener);
-        chrome.tabs.onRemoved.removeListener(onTabRemoved);
-      };
+  // Fetches url; on HTTP 429 waits waitMs then retries once. Returns null on failure.
+  private async fetchWithRetry(url: string, waitMs: number): Promise<string | null> {
+    let res = await this.doFetch(url);
+    if (res === null) return null;
 
-      const timer = setTimeout(() => {
-        cleanup();
-        resolve({ jobs: [], rateLimited: false });
-      }, PAGE_SCRAPE_TIMEOUT_MS);
+    if (res.status === 429) {
+      console.log("[discovery] 429 rate-limited, waiting", waitMs, "ms then retrying");
+      await this.randomDelay(waitMs, waitMs + 2_000);
+      if (!this.running) return null;
+      res = await this.doFetch(url);
+      if (res === null || res.status === 429) {
+        console.warn("[discovery] still rate-limited after retry, skipping");
+        return null;
+      }
+    }
 
-      const listener = (msg: { type: string; jobs?: RawJob[]; rateLimited?: boolean }): void => {
-        if (msg.type === "discovery_page_complete") {
-          cleanup();
-          resolve({ jobs: msg.jobs ?? [], rateLimited: msg.rateLimited ?? false });
-        }
-      };
+    if (!res.ok) {
+      console.warn("[discovery] fetch failed:", res.status, res.statusText, url.slice(0, 120));
+      return null;
+    }
 
-      const onTabRemoved = (removedId: number): void => {
-        if (removedId === tabId) {
-          cleanup();
-          resolve({ jobs: [], rateLimited: false });
-        }
-      };
-
-      chrome.runtime.onMessage.addListener(listener);
-      chrome.tabs.onRemoved.addListener(onTabRemoved);
-
-      chrome.tabs.sendMessage(tabId, { type: "start_discovery_scrape" }).catch(() => {
-        cleanup();
-        resolve({ jobs: [], rateLimited: false });
-      });
-    });
+    const html = await res.text();
+    console.log("[discovery] fetched", html.length, "chars from", url.slice(0, 120));
+    return html;
   }
 
-  // Sends 'extract_job_details' and awaits the sendResponse callback.
-  private extractJobDetails(tabId: number): Promise<{
-    description: string;
-    applicant_count: string;
-  } | null> {
-    return new Promise((resolve) => {
-      const onTabRemoved = (removedId: number): void => {
-        if (removedId === tabId) {
-          chrome.tabs.onRemoved.removeListener(onTabRemoved);
-          clearTimeout(fallback);
-          resolve(null);
-        }
-      };
-      chrome.tabs.onRemoved.addListener(onTabRemoved);
+  private offscreenFailed = false; // skip offscreen after first total failure
 
-      const fallback = setTimeout(() => {
-        chrome.tabs.onRemoved.removeListener(onTabRemoved);
+  private async doFetch(url: string): Promise<Response | null> {
+    // Try direct fetch first — works when Chrome grants host_permissions CORS bypass.
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+      });
+      if (res.ok || res.status === 429) return res;
+      // Non-ok but not CORS — fall through to offscreen for a retry
+    } catch (err) {
+      console.warn("[discovery] direct fetch blocked (CORS?), trying offscreen:", String(err));
+    }
+
+    // Fallback: route through offscreen document which runs in a page context
+    // and is not subject to the same CORS restrictions as the service worker.
+    if (this.offscreenFailed) return null;
+    try {
+      return await this.fetchViaOffscreen(url);
+    } catch (err) {
+      console.error("[discovery] offscreen fetch also failed:", String(err));
+      this.offscreenFailed = true;
+      return null;
+    }
+  }
+
+  private async fetchViaOffscreen(url: string): Promise<Response | null> {
+    // Ensure the offscreen document exists.
+    const existing = await chrome.offscreen.hasDocument().catch(() => false);
+    if (!existing) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: [chrome.offscreen.Reason.WORKERS],
+        justification: "Relay LinkedIn guest API fetch to bypass service-worker CORS",
+      });
+    }
+
+    const requestId = Math.random().toString(36).slice(2);
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        chrome.runtime.onMessage.removeListener(listener);
         resolve(null);
       }, 15_000);
 
-      chrome.tabs.sendMessage(
-        tabId,
-        { type: "extract_job_details" },
-        (response) => {
-          chrome.tabs.onRemoved.removeListener(onTabRemoved);
-          clearTimeout(fallback);
-          if (chrome.runtime.lastError) {
-            resolve(null);
-          } else {
-            resolve(response as { description: string; applicant_count: string } | null);
-          }
-        },
-      );
-    });
-  }
+      const listener = (msg: { type: string; requestId?: string; html?: string; status?: number }): void => {
+        if (msg.type !== "OFFSCREEN_FETCH_RESULT" || msg.requestId !== requestId) return;
+        clearTimeout(timeout);
+        chrome.runtime.onMessage.removeListener(listener);
 
-  private waitForTabLoad(tabId: number): Promise<void> {
-    return new Promise((resolve) => {
-      const cleanup = (): void => {
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        chrome.tabs.onRemoved.removeListener(onRemoved);
-        clearTimeout(safetyTimer);
+        const html = msg.html ?? "";
+        const status = msg.status ?? 0;
+
+        // Synthesise a minimal Response-like object the rest of the code can consume.
+        const blob = new Blob([html], { type: "text/html" });
+        const synth = new Response(blob, { status: status || 200 });
+        resolve(status > 0 ? synth : null);
       };
 
-      const onUpdated = (tid: number, info: chrome.tabs.TabChangeInfo): void => {
-        if (tid === tabId && info.status === "complete") {
-          cleanup();
-          const extra =
-            TAB_EXTRA_DELAY_MIN_MS +
-            Math.random() * (TAB_EXTRA_DELAY_MAX_MS - TAB_EXTRA_DELAY_MIN_MS);
-          setTimeout(resolve, extra);
-        }
-      };
-
-      // If the user closes the tab, don't leave waitForTabLoad hanging.
-      const onRemoved = (removedId: number): void => {
-        if (removedId === tabId) { cleanup(); resolve(); }
-      };
-
-      const safetyTimer = setTimeout(() => { cleanup(); resolve(); }, 30_000);
-
-      chrome.tabs.onUpdated.addListener(onUpdated);
-      chrome.tabs.onRemoved.addListener(onRemoved);
+      chrome.runtime.onMessage.addListener(listener);
+      chrome.runtime.sendMessage({ type: "OFFSCREEN_FETCH", url, requestId }).catch(() => {
+        clearTimeout(timeout);
+        chrome.runtime.onMessage.removeListener(listener);
+        resolve(null);
+      });
     });
-  }
-
-  private buildSearchUrl(keyword: string, config: DiscoveryConfig): string {
-    const params = new URLSearchParams({
-      keywords: keyword,
-      location: config.location,
-      f_EA: "true",
-      f_TPR: config.timeRange,
-      sortBy: "DD",
-    });
-    if (config.experienceLevels) params.set("f_E", config.experienceLevels);
-    if (config.remoteFilter) params.set("f_WT", config.remoteFilter);
-    return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
   }
 
   private dedup(jobs: RawJob[]): RawJob[] {
@@ -347,7 +413,6 @@ class DiscoveryOrchestrator {
     return new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
   }
 
-  // Sends status to any open popup AND persists to storage for when popup reopens.
   private broadcastStatus(data: Record<string, unknown>): void {
     chrome.runtime.sendMessage({ type: "discovery_status", ...data }).catch(() => undefined);
     chrome.storage.local.set({ discoveryStatus: data }).catch(() => undefined);

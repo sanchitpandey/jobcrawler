@@ -328,6 +328,23 @@ export async function discoveryEnrich(
   return response.json() as Promise<{ ok: boolean }>;
 }
 
+export interface EnrichBatchItem {
+  linkedin_job_id: string;
+  description: string;
+  title: string;
+  company: string;
+}
+
+export async function discoveryEnrichBatch(
+  jobs: EnrichBatchItem[],
+): Promise<{ enriched: number }> {
+  const response = await fetchWithAuth("/discovery/enrich-batch", { jobs });
+  if (!response.ok) {
+    throw new Error(`discoveryEnrichBatch failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ enriched: number }>;
+}
+
 export async function discoveryScoreBatch(): Promise<DiscoveryScoreResponse> {
   const response = await fetchWithAuth("/discovery/score-batch", {});
   if (!response.ok) {

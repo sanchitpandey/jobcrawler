@@ -7,7 +7,8 @@
     "storage",
     "activeTab",
     "tabs",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "http://localhost:8000/*",
@@ -19,11 +20,6 @@
     "type": "module"
   },
   "content_scripts": [
-    {
-      "matches": ["https://www.linkedin.com/jobs/search/*"],
-      "js": ["dist/content/discovery-scraper.js"],
-      "run_at": "document_idle"
-    },
     {
       "matches": ["https://www.linkedin.com/jobs/view/*"],
       "js": ["dist/content/job-page-scraper.js", "dist/content.js"],

@@ -269,6 +269,61 @@ async def enrich_job(
     return {"ok": True}
 
 
+# ── Enrich-batch ───────────────────────────────────────────────────────────────
+
+class EnrichBatchItem(BaseModel):
+    linkedin_job_id: str = Field(..., max_length=64)
+    description: str = Field("", max_length=20000)
+    title: str = Field("", max_length=512)
+    company: str = Field("", max_length=512)
+
+
+class EnrichBatchRequest(BaseModel):
+    jobs: list[EnrichBatchItem]
+
+
+class EnrichBatchResponse(BaseModel):
+    enriched: int
+
+
+@router.post("/enrich-batch", response_model=EnrichBatchResponse)
+async def enrich_batch(
+    body: EnrichBatchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EnrichBatchResponse:
+    """Batch-enrich multiple jobs in one transaction."""
+    if not body.jobs:
+        return EnrichBatchResponse(enriched=0)
+
+    ext_ids = [f"linkedin:{j.linkedin_job_id}" for j in body.jobs]
+    result = await db.execute(
+        select(Application).where(
+            Application.user_id == current_user.id,
+            Application.external_id.in_(ext_ids),
+        )
+    )
+    apps_by_ext_id = {app.external_id: app for app in result.scalars().all()}
+
+    enriched = 0
+    for item in body.jobs:
+        ext_id = f"linkedin:{item.linkedin_job_id}"
+        app = apps_by_ext_id.get(ext_id)
+        if app is None:
+            continue
+        app.description = item.description
+        if item.title and not app.title:
+            app.title = item.title
+        if item.company and not app.company:
+            app.company = item.company
+        app.status = "enriched"
+        enriched += 1
+
+    await db.commit()
+    log.info("enrich-batch: enriched=%d user=%s", enriched, current_user.id)
+    return EnrichBatchResponse(enriched=enriched)
+
+
 # ── Score-batch ────────────────────────────────────────────────────────────────
 
 class ScoreBatchResponse(BaseModel):

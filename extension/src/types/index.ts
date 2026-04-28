@@ -27,6 +27,7 @@ export interface DiscoveryStatus {
   approved?: number;
   needsReview?: number;
   error?: string;
+  message?: string;
 }
 
 export interface ApiField {
@@ -145,7 +146,7 @@ export type Message =
   | { type: "stop_discovery" }
   | { type: "discovery_page_complete"; jobs: RawJob[]; searchUrl: string; rateLimited?: boolean }
   | { type: "discovery_progress"; count: number }
-  | { type: "discovery_status"; phase: DiscoveryStatus["phase"]; progress?: number; total?: number; discovered?: number; filtered?: number; scored?: number; approved?: number; needsReview?: number; error?: string }
+  | { type: "discovery_status"; phase: DiscoveryStatus["phase"]; progress?: number; total?: number; discovered?: number; filtered?: number; scored?: number; approved?: number; needsReview?: number; error?: string; message?: string }
   // Auto-apply flow messages
   | { type: "start_auto_apply"; payload?: { maxJobs?: number } }
   | { type: "stop_auto_apply" }
