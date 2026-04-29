@@ -98,18 +98,24 @@ async function fetchWithAuth(
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * POST /auth/login — uses OAuth2PasswordRequestForm (form-encoded).
- * The server expects `username` (not `email`) per the OAuth2 spec.
+ * POST /auth/login — JSON body { email, password }.
  */
 export async function login(email: string, password: string): Promise<AuthToken> {
-  const formBody = new URLSearchParams({ username: email, password });
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: formBody.toString(),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
   });
   if (!response.ok) {
-    throw new Error(`Login failed: ${response.status} ${response.statusText}`);
+    const err = await response.json().catch(() => ({ detail: "Login failed" }));
+    const detail = err.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg ?? "error").join("; ")
+          : `Login failed: ${response.status}`;
+    throw new Error(message);
   }
   const data = (await response.json()) as {
     access_token: string;

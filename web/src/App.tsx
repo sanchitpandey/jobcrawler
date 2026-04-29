@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
+import { Layout } from './components/Layout'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -20,14 +21,18 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
-      {/* Protected */}
+      {/* Standalone protected (no sidebar layout) */}
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
-      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-      <Route path="/applications" element={<ProtectedRoute><Applications /></ProtectedRoute>} />
-      <Route path="/review" element={<ProtectedRoute><ReviewQueue /></ProtectedRoute>} />
-      <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
-      <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+
+      {/* Protected — wrapped in sidebar Layout */}
+      <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/applications" element={<Applications />} />
+        <Route path="/review" element={<ReviewQueue />} />
+        <Route path="/billing" element={<Billing />} />
+        <Route path="/settings" element={<Settings />} />
+      </Route>
     </Routes>
   )
 }

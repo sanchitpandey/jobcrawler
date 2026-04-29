@@ -1,4 +1,6 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+// In development VITE_API_URL=/api — requests go through Vite's proxy to localhost:8000.
+// In production VITE_API_URL=https://api.jobcrawler.io — direct HTTPS, FastAPI CORS handles it.
+const API_BASE: string = import.meta.env.VITE_API_URL ?? '/api'
 
 function getToken(): string | null {
   return localStorage.getItem('access_token')
@@ -20,7 +22,7 @@ async function tryRefresh(): Promise<boolean> {
   const refresh = getRefreshToken()
   if (!refresh) return false
   try {
-    const res = await fetch(`${API_URL}/auth/refresh`, {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refresh }),
@@ -36,7 +38,8 @@ async function tryRefresh(): Promise<boolean> {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const url = `${API_BASE}${path}`
+  const res = await fetch(url, {
     ...options,
     headers: { ...authHeaders(), ...(options.headers ?? {}) },
   })
@@ -44,7 +47,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (res.status === 401) {
     const refreshed = await tryRefresh()
     if (refreshed) {
-      const retry = await fetch(`${API_URL}${path}`, {
+      const retry = await fetch(url, {
         ...options,
         headers: { ...authHeaders(), ...(options.headers ?? {}) },
       })
@@ -64,7 +67,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Request failed' }))
-    throw new Error(err.detail ?? 'Request failed')
+    const raw = err.detail
+    // FastAPI validation errors return detail as an array of {msg, loc} objects
+    const message =
+      typeof raw === 'string'
+        ? raw
+        : Array.isArray(raw)
+          ? raw.map((e: { msg?: string }) => e.msg ?? 'Validation error').join('; ')
+          : 'Request failed'
+    throw new Error(message)
   }
 
   const text = await res.text()

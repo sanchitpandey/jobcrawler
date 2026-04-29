@@ -42,9 +42,14 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onMessage.addListener(
   (message: Message, sender, sendResponse) => {
     handleMessage(message, sender)
-      .then(sendResponse)
+      .then((result) => {
+        // Port may already be closed if popup navigated away — suppress the error.
+        try { sendResponse(result); } catch { /* port closed */ }
+      })
       .catch((err: unknown) => {
-        sendResponse({ type: "ERROR", payload: { message: String(err) } });
+        try {
+          sendResponse({ type: "ERROR", payload: { message: String(err) } });
+        } catch { /* port closed */ }
       });
     return true; // keep channel open for async response
   }
