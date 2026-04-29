@@ -53,14 +53,11 @@ function escapeHtml(s: string): string {
 
 const OVERLAY_CSS = `
 :host, * { box-sizing: border-box; }
-/* Re-enable pointer events on all shadow content (host is pointer-events:none). */
 .jc-root, .jc-root * { pointer-events: auto; }
 
 .jc-root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
   font-size: 14px;
-  color: #0f172a;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -68,55 +65,70 @@ const OVERLAY_CSS = `
 
 .jc-badge {
   position: fixed;
-  top: 16px;
+  top: 72px;
   right: 16px;
-  background: #ffffff;
+  background: #0B0B0F;
+  border: 1px solid #2A2A33;
   border-radius: 999px;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.15);
-  padding: 8px 14px 8px 8px;
+  padding: 6px 14px 6px 6px;
   display: flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
   user-select: none;
-  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5), 0 0 0 1px rgba(255,138,31,.15);
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
-.jc-badge:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(15,23,42,0.18); }
+.jc-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 36px rgba(0,0,0,.6), 0 0 0 1px rgba(255,138,31,.25);
+}
 
 .jc-badge-circle {
-  width: 32px; height: 32px; border-radius: 50%;
+  width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 14px; color: #fff;
+  font-weight: 700; font-size: 12px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
 }
-.jc-badge-circle--good   { background: #22c55e; }
-.jc-badge-circle--ok     { background: #f59e0b; }
-.jc-badge-circle--poor   { background: #ef4444; }
+.jc-badge-circle--good { background: #7DDC8A; color: #0B0B0F; }
+.jc-badge-circle--ok   { background: #FF8A1F; color: #0B0B0F; }
+.jc-badge-circle--poor { background: #FF6A6A; color: #0B0B0F; }
 
-.jc-badge-text { font-weight: 600; font-size: 13px; }
+.jc-badge-text {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px; color: #EDE6D6;
+}
+
+.jc-badge-tag {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px; color: #6B6A63;
+  text-transform: uppercase; letter-spacing: .08em;
+  border-left: 1px solid #2A2A33; padding-left: 10px;
+}
 
 .jc-badge-detail {
   display: none;
   position: absolute; top: 100%; right: 0; margin-top: 8px;
-  background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
-  padding: 12px 14px; min-width: 240px; max-width: 320px;
-  box-shadow: 0 8px 24px rgba(15,23,42,0.15);
-  font-size: 13px; line-height: 1.45;
+  background: #111116; border: 1px solid #1F1F26; border-radius: 12px;
+  padding: 14px 16px; min-width: 240px; max-width: 320px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.6);
+  font-size: 13px; line-height: 1.5; color: #EDE6D6;
 }
 .jc-badge.jc-badge--expanded .jc-badge-detail { display: block; }
 .jc-badge-detail h4 {
-  margin: 0 0 6px 0; font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.05em; color: #64748b;
+  margin: 0 0 8px 0; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em; color: #6B6A63;
+  font-family: "JetBrains Mono", monospace;
 }
-.jc-badge-detail ul { margin: 0 0 8px 0; padding-left: 16px; }
-.jc-badge-detail li { margin-bottom: 3px; color: #334155; }
-.jc-badge-comp { color: #475569; font-size: 12px; }
+.jc-badge-detail ul { margin: 0 0 10px 0; padding-left: 16px; }
+.jc-badge-detail li { margin-bottom: 4px; color: #A8A192; font-size: 12px; }
+.jc-badge-comp { color: #A8A192; font-size: 12px; font-family: "JetBrains Mono", monospace; }
 
 /* ── Review panel ────────────────────────────────────────────────────────── */
 
 .jc-backdrop {
   position: fixed; inset: 0;
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(11, 11, 15, 0.6);
   animation: jc-fade 150ms ease;
 }
 @keyframes jc-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -124,9 +136,10 @@ const OVERLAY_CSS = `
 .jc-panel {
   position: fixed; top: 0; right: 0; height: 100vh;
   width: 420px; max-width: 100vw;
-  background: #ffffff;
+  background: #0B0B0F;
+  border-left: 1px solid #1F1F26;
   display: flex; flex-direction: column;
-  box-shadow: -4px 0 24px rgba(15, 23, 42, 0.18);
+  box-shadow: -8px 0 40px rgba(0,0,0,.6);
   animation: jc-slide 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 @keyframes jc-slide {
@@ -135,88 +148,123 @@ const OVERLAY_CSS = `
 }
 
 .jc-header {
-  padding: 18px 20px 14px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 20px;
+  border-bottom: 1px solid #1F1F26;
 }
 .jc-header-row {
   display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 14px;
 }
-.jc-title { font-size: 13px; font-weight: 700; color: #0f172a; letter-spacing: 0.02em; }
+.jc-title {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px; color: #6B6A63;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.jc-close-btn {
+  background: none; border: none; cursor: pointer;
+  color: #6B6A63; font-size: 16px; line-height: 1; padding: 0;
+  transition: color .1s;
+}
+.jc-close-btn:hover { color: #EDE6D6; }
+
+.jc-score-row {
+  display: flex; align-items: center; gap: 14px;
+}
+.jc-score-big {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.jc-score-big--good { color: #FF8A1F; }
+.jc-score-big--ok   { color: #FF8A1F; }
+.jc-score-big--poor { color: #FF6A6A; }
+
 .jc-score-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 10px; border-radius: 999px;
-  font-size: 12px; font-weight: 700; color: #fff;
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 999px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  margin-bottom: 4px;
 }
-.jc-score-pill--good { background: #22c55e; }
-.jc-score-pill--ok   { background: #f59e0b; }
-.jc-score-pill--poor { background: #ef4444; }
-.jc-job { font-size: 13px; color: #475569; }
+.jc-score-pill--good { background: rgba(125,220,138,0.15); color: #7DDC8A; }
+.jc-score-pill--ok   { background: rgba(255,138,31,0.15);  color: #FFB061; }
+.jc-score-pill--poor { background: rgba(255,106,106,0.15); color: #FF6A6A; }
+
+.jc-job-title { font-size: 14px; font-weight: 500; color: #EDE6D6; line-height: 1.3; }
+.jc-job-meta  { font-family: "JetBrains Mono", monospace; font-size: 11px; color: #A8A192; margin-top: 2px; }
 
 .jc-field-list {
   flex: 1 1 auto; overflow-y: auto;
-  padding: 16px 20px;
+  padding: 20px;
+  scrollbar-width: thin; scrollbar-color: #2A2A33 transparent;
+}
+.jc-fields-label {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px; color: #6B6A63;
+  text-transform: uppercase; letter-spacing: .1em;
+  margin-bottom: 12px;
 }
 .jc-field {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #ffffff;
+  border: 1px solid #1F1F26;
+  border-radius: 8px;
+  background: #111116;
 }
 .jc-field--review {
-  background: #fffbeb;
-  border-color: #fcd34d;
+  border-color: rgba(255,138,31,0.5);
+  background: rgba(255,138,31,0.04);
 }
 .jc-field-header {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 8px; gap: 10px;
 }
 .jc-field-label {
-  font-size: 13px; font-weight: 600; color: #0f172a;
+  font-size: 11px; font-weight: 500; color: #EDE6D6;
   flex: 1 1 auto;
 }
 .jc-confidence {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 600;
-  padding: 3px 8px; border-radius: 999px;
+  display: inline-flex; align-items: center;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 8.5px; font-weight: 600;
+  padding: 2px 7px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: .06em;
   white-space: nowrap;
 }
-.jc-confidence::before {
-  content: ""; width: 6px; height: 6px; border-radius: 50%;
-}
-.jc-confidence--pattern { background: #ecfdf5; color: #047857; }
-.jc-confidence--pattern::before { background: #22c55e; }
-.jc-confidence--ai      { background: #eff6ff; color: #1d4ed8; }
-.jc-confidence--ai::before { background: #2563eb; }
-.jc-confidence--review  { background: #fef3c7; color: #92400e; }
-.jc-confidence--review::before { background: #f59e0b; }
+.jc-confidence--pattern { background: rgba(125,220,138,0.12); color: #7DDC8A; }
+.jc-confidence--ai      { background: rgba(255,138,31,0.12);  color: #FF8A1F; }
+.jc-confidence--review  { background: rgba(255,138,31,0.2);   color: #FFB061; }
 
 .jc-field-value {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #cbd5e1;
+  padding: 7px 10px;
+  border: 1px solid #2A2A33;
   border-radius: 6px;
-  font-size: 13px;
-  font-family: inherit;
-  color: #0f172a;
-  background: #ffffff;
+  font-size: 12px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #EDE6D6;
+  background: #0B0B0F;
   resize: vertical;
+  transition: border-color .12s;
 }
 .jc-field-value:focus {
   outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  border-color: #FF8A1F;
 }
 textarea.jc-field-value { min-height: 70px; }
 
 .jc-footer {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid #1F1F26;
   padding: 14px 20px 18px 20px;
-  background: #ffffff;
+  background: rgba(17,17,22,0.5);
 }
 .jc-summary {
-  font-size: 12px; color: #64748b; margin-bottom: 12px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px; color: #A8A192; margin-bottom: 12px;
+}
+.jc-shortcut {
+  text-align: center;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px; color: #6B6A63; margin-top: 8px;
 }
 .jc-actions {
   display: flex; gap: 10px;
@@ -224,7 +272,7 @@ textarea.jc-field-value { min-height: 70px; }
 .jc-btn {
   flex: 1;
   padding: 10px 14px;
-  font-size: 13px; font-weight: 600;
+  font-size: 12px; font-weight: 600;
   border-radius: 8px;
   cursor: pointer;
   font-family: inherit;
@@ -232,13 +280,13 @@ textarea.jc-field-value { min-height: 70px; }
   transition: background 120ms ease, border-color 120ms ease;
 }
 .jc-btn-skip {
-  background: #ffffff; color: #475569; border-color: #cbd5e1;
+  background: #0B0B0F; color: #EDE6D6; border-color: #1F1F26;
 }
-.jc-btn-skip:hover { background: #f1f5f9; }
+.jc-btn-skip:hover { background: #1F1F26; }
 .jc-btn-submit {
-  background: #2563eb; color: #ffffff;
+  background: #FF8A1F; color: #0B0B0F;
 }
-.jc-btn-submit:hover { background: #1d4ed8; }
+.jc-btn-submit:hover { background: #FFB061; }
 `;
 
 // ── Shadow host helpers ──────────────────────────────────────────────────────
@@ -334,7 +382,8 @@ export function showScoreBadge(score: ScoreResponse): void {
   root.innerHTML = `
     <div class="jc-badge" data-bucket="${bucket}">
       <div class="jc-badge-circle jc-badge-circle--${bucket}">${score.fit_score}</div>
-      <div class="jc-badge-text">${escapeHtml(verdict)}</div>
+      <div class="jc-badge-text">${escapeHtml(verdict)} match</div>
+      <div class="jc-badge-tag">jc</div>
       <div class="jc-badge-detail">
         ${gapsHtml}
         ${compHtml}
@@ -454,25 +503,39 @@ export function showReviewPanel(
       .map(escapeHtml)
       .join(" — ");
 
+    const scoreNum = score !== undefined ? String(score) : "";
+    const scoreRowHtml = score !== undefined && scoreBucket ? `
+      <div class="jc-score-row">
+        <div class="jc-score-big jc-score-big--${scoreBucket}">${scoreNum}</div>
+        <div>
+          ${scorePillHtml}
+          <div class="jc-job-title">${escapeHtml(jobInfo.title)}</div>
+          <div class="jc-job-meta">${[jobInfo.company, jobInfo.location].filter(Boolean).map(escapeHtml).join(" · ")}</div>
+        </div>
+      </div>
+    ` : `<div class="jc-job-title">${jobLine}</div>`;
+
     root.innerHTML = `
       <div class="jc-backdrop" data-jc="backdrop"></div>
       <div class="jc-panel" role="dialog" aria-label="JobCrawler review">
         <div class="jc-header">
           <div class="jc-header-row">
-            <div class="jc-title">JOBCRAWLER REVIEW</div>
-            ${scorePillHtml}
+            <div class="jc-title">jobcrawler · review</div>
+            <button class="jc-close-btn" data-jc="close" aria-label="Close">×</button>
           </div>
-          <div class="jc-job">${jobLine}</div>
+          ${scoreRowHtml}
         </div>
         <div class="jc-field-list">
-          ${fieldsHtml || '<div style="color:#64748b;font-size:13px;">No fields to review.</div>'}
+          <div class="jc-fields-label">Form fields · ${fields.length} detected</div>
+          ${fieldsHtml || '<div style="color:#6B6A63;font-size:12px;font-family:monospace;">No fields to review.</div>'}
         </div>
         <div class="jc-footer">
           <div class="jc-summary">${escapeHtml(summary)}</div>
           <div class="jc-actions">
-            <button class="jc-btn jc-btn-skip" data-jc="skip">Skip Job</button>
-            <button class="jc-btn jc-btn-submit" data-jc="submit">Submit Application →</button>
+            <button class="jc-btn jc-btn-skip" data-jc="skip">Skip job</button>
+            <button class="jc-btn jc-btn-submit" data-jc="submit">Submit application →</button>
           </div>
+          <div class="jc-shortcut">⌘ + ↵ to submit · esc to cancel</div>
         </div>
       </div>
     `;
@@ -519,9 +582,9 @@ export function showReviewPanel(
     };
     window.addEventListener("keydown", onKeydown, true);
 
-    root
-      .querySelector<HTMLButtonElement>('[data-jc="skip"]')!
-      .addEventListener("click", () => settle(null));
+    for (const el of root.querySelectorAll<HTMLElement>('[data-jc="skip"], [data-jc="close"]')) {
+      el.addEventListener("click", () => settle(null));
+    }
     root
       .querySelector<HTMLButtonElement>('[data-jc="submit"]')!
       .addEventListener("click", () => settle(collectAnswers()));

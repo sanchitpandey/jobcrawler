@@ -226,8 +226,10 @@ const resumeApplyBtn  = document.querySelector<HTMLButtonElement>("#resume-apply
 const pausedStopBtn   = document.querySelector<HTMLButtonElement>("#paused-stop-btn")!;
 
 // complete panel
-const completeIcon        = document.querySelector<HTMLDivElement>("#complete-icon")!;
-const completeTitleEl     = document.querySelector<HTMLParagraphElement>("#complete-title")!;
+const completeIconRing    = document.querySelector<HTMLDivElement>("#complete-icon-ring")!;
+const completeIcon        = document.querySelector<HTMLSpanElement>("#complete-icon")!;
+const completeTitleEl     = document.querySelector<HTMLDivElement>("#complete-title")!;
+const completeSubtitleEl  = document.querySelector<HTMLParagraphElement>("#complete-subtitle")!;
 const completeApplied     = document.querySelector<HTMLSpanElement>("#complete-applied")!;
 const completeSkipped     = document.querySelector<HTMLSpanElement>("#complete-skipped")!;
 const completeFailed      = document.querySelector<HTMLSpanElement>("#complete-failed")!;
@@ -706,14 +708,18 @@ function onAutoApplyProgress(msg: Record<string, unknown>): void {
       modal_not_found:      "Apply modal did not open",
     };
     if (reason) {
-      completeReasonRow.style.display = "flex";
-      completeReasonEl.textContent    = REASON_LABELS[reason] ?? reason;
-      completeIcon.textContent        = "!";
-      completeTitleEl.textContent     = "Session Stopped";
+      completeReasonRow.style.display  = "flex";
+      completeReasonEl.textContent     = REASON_LABELS[reason] ?? reason;
+      completeIcon.textContent         = "!";
+      completeTitleEl.textContent      = "Session stopped.";
+      completeSubtitleEl.textContent   = "We saved your progress.";
+      completeIconRing.className       = "complete-icon-ring stopped";
     } else {
-      completeReasonRow.style.display = "none";
-      completeIcon.textContent        = "✓";
-      completeTitleEl.textContent     = "Session Complete";
+      completeReasonRow.style.display  = "none";
+      completeIcon.textContent         = "✓";
+      completeTitleEl.textContent      = "Session complete.";
+      completeSubtitleEl.textContent   = "Nice. Time to stretch.";
+      completeIconRing.className       = "complete-icon-ring success";
     }
     void loadStats();
   }

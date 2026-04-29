@@ -84,7 +84,7 @@ async function start(): Promise<void> {
     name: "JobCrawler",
     description: `${plan === "monthly" ? "Monthly" : "Annual"} subscription`,
     order_id: order.order_id,
-    theme: { color: "#2563eb" },
+    theme: { color: "#FF8A1F" },
     modal: {
       ondismiss: () => {
         setStatus("Checkout cancelled", "err");

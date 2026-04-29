@@ -4,47 +4,314 @@
   <meta charset="UTF-8" />
   <title>JobCrawler — Checkout</title>
   <style>
+    :root {
+      --ink:    #0B0B0F;
+      --ink2:   #111116;
+      --line:   #1F1F26;
+      --line2:  #2A2A33;
+      --cream:  #EDE6D6;
+      --cream2: #A8A192;
+      --mute:   #6B6A63;
+      --amber:  #FF8A1F;
+      --amber2: #FFB061;
+      --green:  #7DDC8A;
+      --red:    #FF6A6A;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f9fafb;
-      color: #1a1a1a;
+      font-family: -apple-system, BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+      background: var(--ink);
+      color: var(--cream);
       min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Top bar ────────────────────────────────────────────── */
+    .topbar {
+      height: 56px; border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; padding: 0 32px;
+    }
+    .topbar-brand {
+      display: flex; align-items: center; gap: 10px; flex: 1;
+    }
+    .topbar-icon {
+      position: relative; width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .topbar-icon::before {
+      content: ''; position: absolute; inset: 0;
+      border: 1px solid var(--line2); border-radius: 7px;
+    }
+    .topbar-icon svg { width: 16px; height: 16px; position: relative; }
+    .topbar-name {
+      font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--cream);
+    }
+    .topbar-slug {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 10px; color: var(--mute);
+      text-transform: uppercase; letter-spacing: .06em; margin-left: 8px;
+    }
+    .topbar-secure {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 11px; color: var(--cream2);
+      display: flex; align-items: center; gap: 6px;
+    }
+
+    /* ── Main layout ────────────────────────────────────────── */
+    .main {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      min-height: calc(100vh - 56px);
+      max-width: 1100px; margin: 0 auto;
+    }
+
+    /* ── Order summary (left) ───────────────────────────────── */
+    .summary {
+      padding: 64px 72px; border-right: 1px solid var(--line);
+    }
+    .summary-eyebrow {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 11px; color: var(--amber);
+      text-transform: uppercase; letter-spacing: .1em;
+    }
+    .summary-heading {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 56px; line-height: .95; letter-spacing: -.01em;
+      margin-top: 12px;
+    }
+    .summary-heading em { color: var(--amber); font-style: italic; }
+    .summary-desc {
+      font-size: 14px; color: var(--cream2); line-height: 1.6;
+      margin-top: 20px; max-width: 420px;
+    }
+
+    /* Plan selector */
+    .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 36px; }
+    .plan-card {
+      border: 1px solid var(--line2); border-radius: 12px; padding: 20px;
+      background: rgba(17,17,22,0.6); cursor: pointer; transition: border-color .15s;
+    }
+    .plan-card.active {
+      border-color: var(--amber);
+      background: linear-gradient(180deg, #1A1207 0%, #110C04 100%);
+    }
+    .plan-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .plan-card-label {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--mute);
+    }
+    .plan-card.active .plan-card-label { color: var(--amber); }
+    .plan-radio {
+      width: 16px; height: 16px; border-radius: 50%;
+      border: 1px solid var(--line2); background: transparent;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .plan-card.active .plan-radio {
+      background: var(--amber); border-color: var(--amber);
+    }
+    .plan-radio-dot {
+      display: none; width: 6px; height: 6px;
+      border-radius: 50%; background: var(--ink);
+    }
+    .plan-card.active .plan-radio-dot { display: block; }
+    .plan-price {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 40px; line-height: 1; color: var(--cream);
+    }
+    .plan-price-sub {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 11px; color: var(--cream2); margin-top: 4px;
+    }
+    .save-badge {
+      position: absolute; top: -10px; right: 16px;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--amber); color: var(--ink);
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    }
+    .plan-annual-wrap { position: relative; }
+
+    /* Line items */
+    .line-items {
+      margin-top: 36px; border-top: 1px solid var(--line);
+      padding-top: 20px;
+    }
+    .li-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 13px; margin-bottom: 10px; color: var(--cream2);
+    }
+    .li-row .li-val { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; color: var(--cream); }
+    .li-row.discount .li-val { color: var(--amber); }
+    .li-row.discount .li-label { color: var(--amber); }
+    .li-total {
+      display: flex; justify-content: space-between; align-items: baseline;
+      border-top: 1px solid var(--line); padding-top: 16px; margin-top: 4px;
+      color: var(--cream);
+    }
+    .li-total-label { font-size: 13px; font-weight: 500; }
+    .li-total-amount {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 36px; line-height: 1;
+    }
+
+    /* ── Payment (right) ────────────────────────────────────── */
+    .payment {
+      padding: 64px 56px;
+      background: rgba(17,17,22,0.3);
+    }
+    .payment-eyebrow {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 11px; color: var(--cream2);
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 16px;
+    }
+
+    /* Status display */
+    .checkout-status {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 20px;
+      min-height: 320px;
+    }
+    .spinner-ring {
+      width: 48px; height: 48px;
+    }
+    .spinner-ring svg { animation: spin360 1s linear infinite; }
+    @keyframes spin360 { to { transform: rotate(360deg); } }
+
+    #plan-info {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 13px; color: var(--cream2); text-align: center;
+    }
+
+    #spinner { /* shown while loading */ }
+
+    .status {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+      font-size: 13px; min-height: 20px;
+      text-align: center; color: var(--cream2);
+    }
+    .status.ok  { color: var(--green); }
+    .status.err { color: var(--red); }
+
+    /* Status icon for ok/err */
+    .status-icon {
+      display: none; width: 48px; height: 48px;
+      border-radius: 50%; align-items: center; justify-content: center;
+      margin-bottom: 4px;
+    }
+    .status-icon.ok {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
+      background: rgba(125,220,138,0.1); border: 1px solid rgba(125,220,138,0.4);
+      color: var(--green);
     }
-    .card {
-      max-width: 420px;
-      width: 100%;
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-radius: 12px;
-      padding: 32px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-      text-align: center;
+    .status-icon.err {
+      display: flex;
+      background: rgba(255,106,106,0.1); border: 1px solid rgba(255,106,106,0.4);
+      color: var(--red);
     }
-    h1 { font-size: 18px; font-weight: 600; color: #111827; margin-bottom: 8px; }
-    p  { font-size: 13px; color: #6b7280; margin-bottom: 16px; }
-    .status { font-size: 13px; margin-top: 16px; min-height: 20px; }
-    .ok { color: #059669; }
-    .err { color: #dc2626; }
-    .spinner {
-      width: 32px; height: 32px; border: 3px solid #e5e7eb;
-      border-top-color: #2563eb; border-radius: 50%;
-      animation: spin 0.8s linear infinite; margin: 16px auto;
+
+    /* Tagline */
+    .payment-tag {
+      font-size: 11px; color: var(--mute); text-align: center; margin-top: 24px;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>JobCrawler Pro</h1>
-    <p id="plan-info">Loading…</p>
-    <div class="spinner" id="spinner"></div>
-    <div class="status" id="status"></div>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-brand">
+      <div class="topbar-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2" stroke="#FF8A1F"/>
+          <path d="M12 8.8V4M12 15.2V20M8.8 12H4M15.2 12H20M9.7 9.7L6.3 6.3M14.3 9.7L17.7 6.3M9.7 14.3L6.3 17.7M14.3 14.3L17.7 17.7" stroke="#EDE6D6"/>
+        </svg>
+      </div>
+      <span class="topbar-name">JobCrawler</span>
+      <span class="topbar-slug">/ checkout</span>
+    </div>
+    <div class="topbar-secure">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 15v2m-6 4h12a2 2 0 002-2v-7a2 2 0 00-2-2H6a2 2 0 00-2 2v7a2 2 0 002 2zm10-12V7a4 4 0 00-8 0v4h8z"/>
+      </svg>
+      secure · razorpay
+    </div>
   </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Order summary -->
+    <div class="summary">
+      <div class="summary-eyebrow">order summary</div>
+      <h1 class="summary-heading">Upgrade to <em>Pro.</em></h1>
+      <p class="summary-desc">Unlimited applications. Unlimited AI scoring. WhatsApp support. Cancel anytime — and you will, the moment you sign your offer.</p>
+
+      <div class="plans">
+        <div class="plan-card">
+          <div class="plan-card-header">
+            <div class="plan-card-label">Monthly</div>
+            <div class="plan-radio"><div class="plan-radio-dot"></div></div>
+          </div>
+          <div class="plan-price">₹499</div>
+          <div class="plan-price-sub">/ month</div>
+        </div>
+        <div class="plan-annual-wrap">
+          <span class="save-badge">save 17%</span>
+          <div class="plan-card active">
+            <div class="plan-card-header">
+              <div class="plan-card-label">Annual</div>
+              <div class="plan-radio"><div class="plan-radio-dot"></div></div>
+            </div>
+            <div class="plan-price">₹4,999</div>
+            <div class="plan-price-sub">/ year · ₹417/mo equiv.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="line-items">
+        <div class="li-row">
+          <span class="li-label">JobCrawler Pro</span>
+          <span class="li-val" id="li-plan-price">₹4,999.00</span>
+        </div>
+        <div class="li-row">
+          <span class="li-label">GST (18%)</span>
+          <span class="li-val" id="li-gst">₹899.82</span>
+        </div>
+        <div class="li-total">
+          <span class="li-total-label">Total due today</span>
+          <span class="li-total-amount" id="li-total">₹5,898.82</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payment -->
+    <div class="payment">
+      <div class="payment-eyebrow">payment</div>
+
+      <div class="checkout-status">
+        <div id="spinner" class="spinner-ring">
+          <svg viewBox="0 0 48 48" width="48" height="48">
+            <circle cx="24" cy="24" r="20" stroke="#1F1F26" stroke-width="3" fill="none"/>
+            <circle cx="24" cy="24" r="20" stroke="#FF8A1F" stroke-width="3" fill="none"
+              stroke-linecap="round" stroke-dasharray="40 160"/>
+          </svg>
+        </div>
+
+        <p id="plan-info" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#A8A192;text-align:center">Loading…</p>
+        <div id="status" class="status"></div>
+      </div>
+
+      <p class="payment-tag">Payments powered by Razorpay · your card data never touches our servers</p>
+    </div>
+
+  </div>
+
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="dist/checkout.js" type="module"></script>
 </body>

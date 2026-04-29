@@ -4,276 +4,464 @@
   <meta charset="UTF-8" />
   <title>JobCrawler</title>
   <style>
+    /* ── Design tokens ──────────────────────────────────────── */
     :root {
-      --blue:       #2563eb;
-      --blue-h:     #1d4ed8;
-      --blue-lt:    #eff6ff;
-      --blue-bd:    #bfdbfe;
-      --text:       #0f172a;
-      --muted:      #64748b;
-      --xmuted:     #94a3b8;
-      --border:     #e2e8f0;
-      --surface:    #f8fafc;
-      --white:      #ffffff;
-      --green:      #16a34a;
-      --amber:      #d97706;
-      --red:        #dc2626;
-      --red-lt:     #fef2f2;
-      --red-bd:     #fca5a5;
-      --mono:       'SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
+      --ink:    #0B0B0F;
+      --ink2:   #111116;
+      --line:   #1F1F26;
+      --line2:  #2A2A33;
+      --cream:  #EDE6D6;
+      --cream2: #A8A192;
+      --mute:   #6B6A63;
+      --amber:  #FF8A1F;
+      --amber2: #FFB061;
+      --green:  #7DDC8A;
+      --red:    #FF6A6A;
+
+      /* Legacy CSS var mappings for JS inline styles in popup.ts */
+      --surface: #111116;
+      --border:  #1F1F26;
+      --text:    #EDE6D6;
+      --muted:   #A8A192;
+      --xmuted:  #6B6A63;
+      --blue:    #FF8A1F;
+      --blue-h:  #FFB061;
+      --blue-lt: rgba(255,138,31,0.08);
+      --blue-bd: rgba(255,138,31,0.3);
+      --red-lt:  rgba(255,106,106,0.08);
+      --red-bd:  rgba(255,106,106,0.3);
+      --mono:    'Cascadia Code','Fira Code','Consolas',monospace;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       width: 320px;
-      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
-      background: var(--white);
-      color: var(--text);
+      background: var(--ink);
+      color: var(--cream);
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ── HEADER ─────────────────────────────────────────── */
-    .hd {
-      display: flex; align-items: center; gap: 9px;
-      padding: 11px 15px 10px;
-      border-bottom: 1.5px solid var(--border);
-      position: relative;
-    }
-    .hd::after {
-      content: ''; position: absolute;
-      bottom: -1.5px; left: 0;
-      width: 48px; height: 1.5px;
-      background: var(--blue);
-    }
-    .logo {
-      width: 20px; height: 20px;
-      background: var(--blue); border-radius: 4px;
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-    }
-    .logo-arrow {
-      width: 0; height: 0;
-      border-top: 5px solid transparent;
-      border-bottom: 5px solid transparent;
-      border-left: 8px solid white;
-      margin-left: 2px;
-    }
-    .hd-title { font-size: 14px; font-weight: 700; letter-spacing: -.01em; flex: 1; }
-    .hd-badge {
-      font-size: 9px; font-weight: 700;
-      color: var(--xmuted); letter-spacing: .08em; text-transform: uppercase;
-    }
-
-    /* ── VIEWS & PANELS ─────────────────────────────────── */
+    /* ── VIEWS & PANELS ─────────────────────────────────────── */
     .view { display: none; }
     .view.on { display: block; }
-    .panel { display: none; padding: 14px 15px; }
+    .panel { display: none; }
     .panel.on { display: block; animation: fadein .14s ease; }
-    .panel-s { max-height: 385px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .panel-s {
+      max-height: 420px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--line2) transparent;
+    }
 
     @keyframes fadein {
       from { opacity: 0; transform: translateY(2px); }
       to   { opacity: 1; transform: none; }
     }
 
-    /* ── USER STRIP ─────────────────────────────────────── */
+    /* ── HEADER ─────────────────────────────────────────────── */
+    .hd {
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 16px; height: 48px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hd-icon {
+      position: relative; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .hd-icon::before {
+      content: '';
+      position: absolute; inset: 0;
+      border: 1px solid var(--line2); border-radius: 6px;
+    }
+    .hd-icon svg { width: 14px; height: 14px; position: relative; }
+    .hd-title {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px; font-weight: 600; letter-spacing: -.01em;
+      color: var(--cream); flex: 1;
+    }
+    .hd-badge {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 9px;
+      color: var(--mute); text-transform: uppercase; letter-spacing: .1em;
+    }
+
+    /* ── USER STRIP ─────────────────────────────────────────── */
     .usr {
       display: flex; align-items: center; gap: 8px;
-      padding: 7px 15px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      padding: 0 16px; height: 36px;
+      background: rgba(17,17,22,0.6);
+      border-bottom: 1px solid var(--line);
     }
     .avt {
-      width: 22px; height: 22px;
-      background: var(--blue-lt); border: 1px solid var(--blue-bd);
+      width: 20px; height: 20px;
+      background: rgba(255,138,31,0.15); border: 1px solid rgba(255,138,31,0.3);
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 9px; font-weight: 800; color: var(--blue);
-      font-family: var(--mono); flex-shrink: 0;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 9px; font-weight: 700; color: var(--amber);
+      flex-shrink: 0;
     }
     #user-email-display {
-      flex: 1; font-size: 11px; color: var(--muted);
+      flex: 1; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 11px; color: var(--cream2);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    #user-tier-display { font-size: 10px; color: var(--xmuted); font-family: var(--mono); flex-shrink: 0; }
+    #user-tier-display {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 9px; color: var(--mute);
+      text-transform: uppercase; flex-shrink: 0;
+    }
     .icon-btn {
       background: none; border: none; cursor: pointer;
-      color: var(--xmuted); font-size: 13px; padding: 2px 4px;
-      border-radius: 3px; line-height: 1; transition: color .1s, background .1s;
+      color: var(--mute); font-size: 12px; padding: 2px 4px;
+      line-height: 1; transition: color .1s;
     }
-    .icon-btn:hover { color: var(--text); background: var(--border); }
+    .icon-btn:hover { color: var(--cream); }
 
-    /* ── FORMS ──────────────────────────────────────────── */
-    .f { margin-bottom: 10px; }
+    /* ── FORMS ──────────────────────────────────────────────── */
+    .f { margin-bottom: 12px; }
     .lbl {
-      display: block; font-size: 10px; font-weight: 700;
-      color: var(--muted); letter-spacing: .05em; text-transform: uppercase;
-      margin-bottom: 4px;
+      display: block; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px;
+      color: var(--mute); letter-spacing: .1em; text-transform: uppercase;
+      margin-bottom: 6px;
     }
-    input[type=text], input[type=email], input[type=password],
-    select, textarea {
-      width: 100%; padding: 7px 9px;
-      border: 1px solid var(--border); border-radius: 5px;
-      font-size: 12px; color: var(--text); background: var(--white);
-      outline: none; transition: border-color .12s, box-shadow .12s;
-      font-family: inherit; resize: none;
+    input[type=text], input[type=email], input[type=password], select, textarea {
+      width: 100%; padding: 6px 10px;
+      border: 1px solid var(--line2); border-radius: 6px;
+      font-size: 12px; color: var(--cream);
+      background: var(--ink2);
+      outline: none; transition: border-color .12s;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; resize: none;
     }
-    input:focus, select:focus, textarea:focus {
-      border-color: var(--blue);
-      box-shadow: 0 0 0 3px rgba(37,99,235,.1);
+    input:focus, select:focus, textarea:focus { border-color: var(--amber); }
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B6A63' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
     }
-    .f-inline { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
-    .f-inline input[type=checkbox] { width: 14px; height: 14px; accent-color: var(--blue); cursor: pointer; }
-    .f-inline label { font-size: 12px; color: var(--text); cursor: pointer; }
-    .sl-wrap { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-    input[type=range] { flex: 1; height: 4px; accent-color: var(--blue); cursor: pointer; padding: 0; border: none; box-shadow: none; }
-    .sl-val { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--blue); min-width: 24px; text-align: right; }
+    .f-inline { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .f-inline input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--amber); cursor: pointer; }
+    .f-inline label { font-size: 12px; color: var(--cream); cursor: pointer; }
+    .sl-wrap { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    input[type=range] {
+      flex: 1; height: 4px; accent-color: var(--amber); cursor: pointer;
+      padding: 0; border: none; box-shadow: none; background: transparent;
+    }
+    .sl-val {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 20px;
+      color: var(--amber); min-width: 28px; text-align: right; line-height: 1;
+    }
 
-    /* ── BUTTONS ────────────────────────────────────────── */
+    /* ── BUTTONS ────────────────────────────────────────────── */
     .btn {
-      display: flex; align-items: center; justify-content: center; gap: 5px;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
       width: 100%; padding: 8px 12px;
-      border: none; border-radius: 6px;
+      border: none; border-radius: 8px;
       font-size: 12px; font-weight: 600; cursor: pointer;
-      transition: background .12s, transform .06s; font-family: inherit;
+      transition: background .12s, transform .06s;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; letter-spacing: .01em;
     }
     .btn:active:not(:disabled) { transform: scale(.98); }
     .btn:disabled { opacity: .4; cursor: not-allowed; transform: none !important; }
 
-    .btn-p  { background: var(--blue); color: white; }
-    .btn-p:hover:not(:disabled) { background: var(--blue-h); }
+    .btn-p  { background: var(--amber); color: var(--ink); height: 40px; font-size: 13px; }
+    .btn-p:hover:not(:disabled) { background: var(--amber2); }
 
-    .btn-g  { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-    .btn-g:hover:not(:disabled) { background: var(--border); }
+    .btn-g  { background: var(--ink2); color: var(--cream); border: 1px solid var(--line2); height: 36px; }
+    .btn-g:hover:not(:disabled) { background: var(--line); }
 
-    .btn-d  { background: var(--red-lt); color: var(--red); border: 1px solid var(--red-bd); }
-    .btn-d:hover:not(:disabled) { background: #fee2e2; }
+    .btn-d  { background: rgba(255,106,106,0.08); color: var(--red); border: 1px solid rgba(255,106,106,0.35); height: 36px; }
+    .btn-d:hover:not(:disabled) { background: rgba(255,106,106,0.14); }
 
-    .btn-sm { padding: 6px 10px; font-size: 11px; }
-    .btn-row { display: flex; gap: 7px; }
+    .btn-sm { padding: 6px 10px; font-size: 11px; height: auto; min-height: 32px; }
+    .btn-row { display: flex; gap: 8px; }
     .btn-row > * { flex: 1; }
 
-    /* ── ERRORS ─────────────────────────────────────────── */
-    .err { font-size: 11px; color: var(--red); min-height: 14px; margin-bottom: 6px; }
+    /* ── ERRORS ─────────────────────────────────────────────── */
+    .err { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 11px; color: var(--red); min-height: 14px; margin-bottom: 6px; }
 
-    /* ── STAT GRID ──────────────────────────────────────── */
-    .sg { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin-bottom: 12px; }
-    .sb { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 9px 7px; text-align: center; }
-    .sn { font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
-    .sl { font-size: 9px; color: var(--xmuted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-top: 3px; }
+    /* ── STAT GRID ──────────────────────────────────────────── */
+    .sg { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 12px; }
+    .sb {
+      background: var(--ink2); border: 1px solid var(--line);
+      border-radius: 8px; padding: 10px 8px; text-align: center;
+    }
+    .sn {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 22px; color: var(--cream);
+      letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums;
+    }
+    .sl {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 8.5px; color: var(--mute);
+      text-transform: uppercase; letter-spacing: .06em; margin-top: 5px;
+    }
 
-    /* ── PROGRESS BAR ───────────────────────────────────── */
-    .pt { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 8px 0; }
-    .pf { height: 100%; background: var(--blue); border-radius: 2px; transition: width .4s cubic-bezier(.4,0,.2,1); position: relative; overflow: hidden; }
+    /* ── PROGRESS BAR ───────────────────────────────────────── */
+    .pt { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+    .pf {
+      height: 100%; background: var(--amber); border-radius: 3px;
+      transition: width .4s cubic-bezier(.4,0,.2,1);
+      position: relative; overflow: hidden;
+    }
     .pf::after {
       content: ''; position: absolute; top: 0; left: -100%; width: 55%; height: 100%;
-      background: linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);
+      background: linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
       animation: sh 1.6s infinite;
     }
     @keyframes sh { to { left: 200%; } }
 
-    /* ── BIG COUNT DISPLAY ──────────────────────────────── */
-    .ph-hd { font-size: 15px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 3px; }
-    .ph-sub { font-size: 11px; color: var(--muted); margin-bottom: 10px; line-height: 1.4; }
-    .big-n { font-family: var(--mono); font-size: 38px; font-weight: 700; color: var(--blue); letter-spacing: -.03em; line-height: 1; }
-    .big-l { font-size: 10px; color: var(--xmuted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-top: 2px; }
-    .cnt-row { display: flex; align-items: baseline; gap: 5px; }
-    .cnt-sep { font-size: 16px; color: var(--xmuted); }
-    .cnt-tot { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--muted); }
+    /* ── BIG COUNT DISPLAY ──────────────────────────────────── */
+    .ph-hd {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 20px; line-height: 1.2; color: var(--cream); margin-bottom: 3px;
+    }
+    .ph-sub { font-size: 11px; color: var(--cream2); margin-bottom: 10px; line-height: 1.4; }
+    .big-n {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 64px; color: var(--amber); line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .big-l {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px; color: var(--mute);
+      text-transform: uppercase; letter-spacing: .06em; margin-top: 3px;
+    }
+    .cnt-row { display: flex; align-items: baseline; gap: 6px; }
+    .cnt-sep { font-family: 'Instrument Serif', serif; font-size: 28px; color: var(--mute); }
+    .cnt-tot {
+      font-family: Georgia,'Times New Roman',serif; font-size: 28px;
+      color: var(--mute); font-variant-numeric: tabular-nums;
+    }
 
-    /* ── RESULT CARD ────────────────────────────────────── */
-    .rc { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; margin-bottom: 11px; }
-    .rr { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    /* ── RESULT CARD ────────────────────────────────────────── */
+    .rc {
+      background: var(--ink2); border: 1px solid var(--line);
+      border-radius: 8px; margin-bottom: 12px; overflow: hidden;
+    }
+    .rr {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 12px;
+    }
     .rr:last-child { border-bottom: none; }
-    .rl { color: var(--muted); }
-    .rv { font-family: var(--mono); font-weight: 700; font-size: 12px; }
+    .rl { color: var(--cream2); }
+    .rv { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-weight: 700; font-size: 13px; color: var(--cream); }
     .rv-g { color: var(--green); }
     .rv-a { color: var(--amber); }
 
-    /* ── JOB CARD ───────────────────────────────────────── */
-    .jc { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: 6px; padding: 9px 11px; margin-bottom: 10px; }
-    .jc-co { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-    .jc-ti { font-size: 13px; font-weight: 600; margin: 2px 0 3px; line-height: 1.2; }
-    .jc-sc { font-family: var(--mono); font-size: 11px; color: var(--blue); font-weight: 700; }
+    /* ── JOB CARD (applying current) ───────────────────────── */
+    .jc {
+      background: var(--ink2); border: 1px solid var(--line);
+      border-left: 3px solid var(--amber);
+      border-radius: 0 8px 8px 0; padding: 10px 12px; margin-bottom: 12px;
+    }
+    .jc-co {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 9px; color: var(--mute);
+      text-transform: uppercase; letter-spacing: .06em;
+    }
+    .jc-ti { font-size: 13px; font-weight: 500; margin: 2px 0 4px; color: var(--cream); line-height: 1.2; }
+    .jc-sc { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 12px; color: var(--amber); font-weight: 700; }
 
-    /* ── DIVIDER ────────────────────────────────────────── */
-    .div { border: none; border-top: 1px solid var(--border); margin: 11px 0; }
+    /* ── DIVIDER ────────────────────────────────────────────── */
+    .div { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
 
-    /* ── USAGE CARD ─────────────────────────────────────── */
-    .uc { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 9px 11px; margin-bottom: 9px; }
-    .uc-l { font-size: 9px; font-weight: 700; color: var(--xmuted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
-    .uc-n { font-family: var(--mono); font-size: 18px; font-weight: 700; line-height: 1; }
-    .uc-n span { font-size: 11px; font-weight: 400; color: var(--muted); }
-    .uc-bt { margin-top: 6px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
-    .uc-bf { height: 100%; background: var(--blue); border-radius: 2px; transition: width .3s; }
-    .uc-r { font-size: 10px; color: var(--xmuted); margin-top: 4px; font-family: var(--mono); }
+    /* ── USAGE CARD ─────────────────────────────────────────── */
+    .uc {
+      background: var(--ink2); border: 1px solid var(--line);
+      border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+    }
+    .uc-l {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 8.5px;
+      color: var(--mute); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px;
+    }
+    .uc-n { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 18px; line-height: 1; color: var(--cream); }
+    .uc-n span { font-size: 11px; color: var(--cream2); }
+    .uc-bt { margin-top: 8px; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+    .uc-bf { height: 100%; background: var(--amber); border-radius: 2px; transition: width .3s; }
+    .uc-r { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px; color: var(--mute); margin-top: 5px; }
 
-    /* ── UPGRADE CARD ───────────────────────────────────── */
-    .up { background: var(--blue-lt); border: 1px solid var(--blue-bd); border-radius: 7px; padding: 10px 11px; margin-bottom: 9px; }
-    .up-t { font-size: 11px; font-weight: 700; color: #1e3a8a; margin-bottom: 3px; }
-    .up-p { font-size: 10px; color: #1e40af; margin-bottom: 8px; line-height: 1.5; }
-    .plan-row { display: flex; gap: 5px; margin-bottom: 7px; }
-    .plan-btn { flex: 1; padding: 5px 4px; background: white; border: 1px solid var(--blue-bd); border-radius: 4px; font-size: 10px; color: #1e3a8a; cursor: pointer; text-align: center; font-family: inherit; transition: background .1s; }
-    .plan-btn:hover { background: #dbeafe; }
-    .plan-btn.sel { background: var(--blue); color: white; border-color: var(--blue); }
-    .plan-n { font-weight: 700; display: block; }
-    .plan-p { font-size: 9px; opacity: .85; font-family: var(--mono); }
-    .btn-up { width: 100%; padding: 6px; background: var(--blue); color: white; border: none; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background .12s; letter-spacing: .02em; }
-    .btn-up:hover { background: var(--blue-h); }
-    .pro-badge { display: inline-block; padding: 1px 5px; background: var(--blue); color: white; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-family: var(--mono); }
+    /* ── UPGRADE CARD ───────────────────────────────────────── */
+    .up {
+      background: linear-gradient(180deg, #1A1207 0%, #110C04 100%);
+      border: 1px solid rgba(255,138,31,0.4);
+      border-radius: 8px; padding: 12px; margin-bottom: 10px;
+    }
+    .up-t {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 18px; color: var(--cream); margin-bottom: 4px;
+    }
+    .up-t em { color: var(--amber); font-style: italic; }
+    .up-p { font-size: 11px; color: var(--cream2); margin-bottom: 10px; line-height: 1.5; }
+    .plan-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .plan-btn {
+      flex: 1; padding: 8px; background: var(--ink2);
+      border: 1px solid var(--line2); border-radius: 6px;
+      font-size: 10px; cursor: pointer; text-align: left; font-family: inherit;
+      transition: border-color .1s; color: var(--cream2);
+    }
+    .plan-btn.sel { background: rgba(255,138,31,0.1); border-color: var(--amber); }
+    .plan-n {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 9px; text-transform: uppercase;
+      letter-spacing: .06em; display: block; margin-bottom: 4px; color: var(--mute);
+    }
+    .plan-btn.sel .plan-n { color: var(--amber); }
+    .plan-p {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 18px; display: block; color: var(--cream); line-height: 1.2;
+    }
+    .plan-p-sub { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px; color: var(--cream2); }
+    .btn-up {
+      width: 100%; padding: 8px; height: 36px;
+      background: var(--amber); color: var(--ink);
+      border: none; border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; transition: background .12s;
+    }
+    .btn-up:hover { background: var(--amber2); }
+    .pro-badge {
+      display: inline-block; padding: 2px 6px;
+      background: var(--amber); color: var(--ink);
+      border-radius: 4px; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 9px;
+      font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    }
 
-    /* ── SPINNER ────────────────────────────────────────── */
-    .spin-w { text-align: center; padding: 18px 0 14px; }
-    .spin { width: 28px; height: 28px; border: 2.5px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: rot .7s linear infinite; margin: 0 auto 10px; }
-    @keyframes rot { to { transform: rotate(360deg); } }
+    /* ── LIVE INDICATOR ─────────────────────────────────────── */
+    .live-label {
+      display: flex; align-items: center; gap: 8px;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px;
+      color: var(--amber); text-transform: uppercase; letter-spacing: .08em;
+      margin-bottom: 4px;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--amber);
+      flex-shrink: 0;
+    }
+    .dot-blink { animation: blink 1.4s ease-in-out infinite; }
+    @keyframes blink { 0%, 60% { opacity: 1 } 80%, 100% { opacity: .25 } }
 
-    /* ── MISC ───────────────────────────────────────────── */
+    /* ── SPINNER ────────────────────────────────────────────── */
+    .spin-svg { animation: spin360 1.6s linear infinite; }
+    @keyframes spin360 { to { transform: rotate(360deg); } }
+
+    /* ── MINI STATS ─────────────────────────────────────────── */
+    .mini-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 10px 0; }
+    .mini-stat {
+      background: var(--ink2); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px; text-align: center;
+    }
+    .mini-stat-l { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 8px; color: var(--mute); text-transform: uppercase; }
+    .mini-stat-n {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 16px; font-variant-numeric: tabular-nums;
+      margin-top: 3px; line-height: 1;
+    }
+    .msc-g { color: var(--green); }
+    .msc-c { color: var(--cream); }
+    .msc-r { color: var(--red); }
+
+    /* ── COMPLETE ICON ──────────────────────────────────────── */
+    .complete-icon-ring {
+      display: inline-flex; width: 48px; height: 48px;
+      align-items: center; justify-content: center; border-radius: 50%;
+      margin-bottom: 16px;
+    }
+    .complete-icon-ring.success {
+      background: rgba(125,220,138,0.1); border: 1px solid rgba(125,220,138,0.4);
+      color: var(--green);
+    }
+    .complete-icon-ring.stopped {
+      background: rgba(255,106,106,0.1); border: 1px solid rgba(255,106,106,0.4);
+      color: var(--red);
+    }
+
+    /* ── MISC ───────────────────────────────────────────────── */
     .mt8  { margin-top: 8px; }
     .mt10 { margin-top: 10px; }
     .mb8  { margin-bottom: 8px; }
     .mb10 { margin-bottom: 10px; }
     .tc   { text-align: center; }
-    .tx   { font-size: 10px; color: var(--xmuted); }
-    .stat-muted { font-size: 9px; color: var(--xmuted); }
+    .tx   { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px; color: var(--mute); }
 
-    /* ── LOGIN VIEW ─────────────────────────────────────── */
-    #login-view { padding: 16px 15px; }
-    #login-view .sub { font-size: 12px; color: var(--muted); margin: 2px 0 14px; }
+    /* ── LOGIN VIEW ─────────────────────────────────────────── */
+    #login-view { padding: 20px 16px; }
+    #login-view .login-title {
+      font-family: Georgia,'Times New Roman',serif;
+      font-size: 26px; color: var(--cream); line-height: 1.2; margin-bottom: 4px;
+    }
+    #login-view .sub { font-size: 12px; color: var(--cream2); margin-bottom: 18px; }
+    .login-footer {
+      margin-top: 14px; text-align: center;
+      font-size: 11px; color: var(--cream2);
+    }
+    .login-footer a { color: var(--amber); text-decoration: none; }
+
+    /* ── INLINE HEADING ROW ─────────────────────────────────── */
+    .head-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .head-row .lbl { margin-bottom: 0; }
+
+    /* ── LAST ERROR BOX ─────────────────────────────────────── */
+    #apply-last-error {
+      padding: 8px 10px; border-radius: 6px;
+      background: rgba(255,106,106,0.08);
+      border: 1px solid rgba(255,106,106,0.3);
+      margin-bottom: 10px; line-height: 1.4;
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 10px; color: var(--red);
+    }
+
+    /* ── READING CARD ───────────────────────────────────────── */
+    .reading-card {
+      border: 1px solid var(--line); border-radius: 6px;
+      background: var(--ink2); padding: 10px 12px; margin: 10px 0;
+    }
+    .reading-label {
+      font-family: 'Cascadia Code','Fira Code','Consolas',monospace; font-size: 8.5px; color: var(--mute);
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px;
+    }
+    .reading-title { font-size: 12px; font-weight: 500; color: var(--cream); }
   </style>
 </head>
 <body>
 
   <!-- HEADER (always visible) -->
   <div class="hd">
-    <div class="logo"><div class="logo-arrow"></div></div>
+    <div class="hd-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2" stroke="#FF8A1F"/>
+        <path d="M12 8.8V4M12 15.2V20M8.8 12H4M15.2 12H20M9.7 9.7L6.3 6.3M14.3 9.7L17.7 6.3M9.7 14.3L6.3 17.7M14.3 14.3L17.7 17.7" stroke="#EDE6D6"/>
+      </svg>
+    </div>
     <span class="hd-title">JobCrawler</span>
-    <span class="hd-badge">Agent</span>
+    <span class="hd-badge">agent</span>
   </div>
 
-  <!-- ══════════════════════════════════════════════════════
+  <!-- ═══════════════════════════════════════════════════════════
        NOT_LOGGED_IN
-  ══════════════════════════════════════════════════════════ -->
+  ════════════════════════════════════════════════════════════ -->
   <div id="login-view" class="view on">
-    <p class="sub">Sign in to your account</p>
+    <div class="login-title">Welcome back.</div>
+    <p class="sub">Sign in to your JobCrawler account.</p>
     <form id="login-form" novalidate>
       <div class="f">
         <label class="lbl" for="email-input">Email</label>
         <input id="email-input" type="email" placeholder="you@example.com" autocomplete="email" required />
       </div>
       <div class="f">
-        <label class="lbl" for="password-input">Password</label>
+        <div class="head-row">
+          <label class="lbl" for="password-input">Password</label>
+          <a href="#" style="font-family:var(--mono);font-size:10px;color:var(--amber);text-decoration:none">forgot?</a>
+        </div>
         <input id="password-input" type="password" placeholder="••••••••" autocomplete="current-password" required />
       </div>
       <p id="login-error" class="err"></p>
-      <button id="login-btn" class="btn btn-p" type="submit">Sign In</button>
+      <button id="login-btn" class="btn btn-p" type="submit">Sign in →</button>
     </form>
+    <div class="login-footer">
+      New here? <a href="#">Create an account</a>
+    </div>
   </div>
 
-  <!-- ══════════════════════════════════════════════════════
+  <!-- ═══════════════════════════════════════════════════════════
        APP VIEW — all logged-in states
-  ══════════════════════════════════════════════════════════ -->
+  ════════════════════════════════════════════════════════════ -->
   <div id="app-view" class="view">
 
     <!-- user strip -->
@@ -284,230 +472,316 @@
       <button class="icon-btn" id="logout-btn" title="Sign out">↩</button>
     </div>
 
-    <!-- ─── NO_PREFERENCES ──────────────────────────────── -->
+    <!-- ─── NO_PREFERENCES ────────────────────────────────── -->
     <div id="preferences-panel" class="panel">
-      <p class="ph-hd">Set up your search</p>
-      <p class="ph-sub">Configure once — the agent handles the rest.</p>
+      <div style="padding:16px">
+        <div class="ph-hd">Set up your search.</div>
+        <p class="ph-sub">Configure once — the agent handles the rest.</p>
 
-      <div class="f">
-        <label class="lbl" for="pref-keywords">Keywords (comma-separated)</label>
-        <textarea id="pref-keywords" rows="2" placeholder="ml engineer, data scientist, machine learning"></textarea>
-      </div>
-      <div class="f">
-        <label class="lbl" for="pref-location">Location</label>
-        <input id="pref-location" type="text" placeholder="Bengaluru, Remote…" />
-      </div>
-      <div class="f">
-        <label class="lbl" for="pref-exp">Experience Level</label>
-        <select id="pref-exp">
-          <option value="">Any level</option>
-          <option value="2">Entry Level</option>
-          <option value="3">Associate</option>
-          <option value="2,3">Entry + Associate</option>
-          <option value="4">Mid-Senior</option>
-          <option value="2,3,4">All levels</option>
-        </select>
-      </div>
-      <div class="f-inline">
-        <input id="pref-remote" type="checkbox" />
-        <label for="pref-remote">Remote only</label>
-      </div>
-      <div class="f">
-        <label class="lbl">Auto-apply threshold</label>
-        <div class="sl-wrap">
-          <input id="pref-threshold" type="range" min="50" max="95" value="75" step="5" />
-          <span class="sl-val" id="pref-threshold-display">75</span>
+        <div class="f">
+          <label class="lbl" for="pref-keywords">
+            Keywords
+            <span style="font-family:var(--mono);font-size:9px;color:var(--mute);text-transform:none;letter-spacing:0;font-weight:400"> comma-separated</span>
+          </label>
+          <textarea id="pref-keywords" rows="2" placeholder="ml engineer, data scientist, machine learning"></textarea>
         </div>
-        <p class="tx mt8">Jobs scoring ≥ this are auto-approved.</p>
-      </div>
+        <div class="f">
+          <label class="lbl" for="pref-location">Location</label>
+          <input id="pref-location" type="text" placeholder="Bengaluru, Remote…" />
+        </div>
+        <div class="f">
+          <label class="lbl" for="pref-exp">Experience</label>
+          <select id="pref-exp">
+            <option value="">Any level</option>
+            <option value="2">Entry Level</option>
+            <option value="3">Associate</option>
+            <option value="2,3">Entry + Associate</option>
+            <option value="4">Mid-Senior</option>
+            <option value="2,3,4">All levels</option>
+          </select>
+        </div>
+        <div class="f-inline">
+          <input id="pref-remote" type="checkbox" />
+          <label for="pref-remote">Remote only</label>
+        </div>
+        <div class="f">
+          <div class="head-row" style="margin-bottom:8px">
+            <label class="lbl" style="margin-bottom:0">Auto-apply threshold</label>
+            <span class="sl-val" id="pref-threshold-display">75</span>
+          </div>
+          <input id="pref-threshold" type="range" min="50" max="95" value="75" step="5" style="width:100%;display:block" />
+          <div style="display:flex;justify-content:space-between;margin-top:5px">
+            <span class="tx">50</span>
+            <span class="tx">conservative</span>
+            <span class="tx">95</span>
+          </div>
+          <p class="tx mt8">Jobs scoring ≥ this are auto-approved.</p>
+        </div>
 
-      <p id="preferences-error" class="err"></p>
-      <button id="save-preferences-btn" class="btn btn-p">Save &amp; Continue</button>
+        <p id="preferences-error" class="err"></p>
+        <button id="save-preferences-btn" class="btn btn-p">Save &amp; continue →</button>
+      </div>
     </div>
 
-    <!-- ─── IDLE ─────────────────────────────────────────── -->
+    <!-- ─── IDLE ──────────────────────────────────────────── -->
     <div id="idle-panel" class="panel panel-s">
-      <div class="sg">
-        <div class="sb">
-          <div class="sn" id="stat-applied-today">—</div>
-          <div class="sl">Today</div>
+      <div style="padding:16px">
+        <!-- stats -->
+        <div class="sg">
+          <div class="sb">
+            <div class="sn" id="stat-applied-today">—</div>
+            <div class="sl">Today</div>
+          </div>
+          <div class="sb">
+            <div class="sn" id="stat-applied-week">—</div>
+            <div class="sl">Week</div>
+          </div>
+          <div class="sb">
+            <div class="sn" id="stat-queue">—</div>
+            <div class="sl">Queue</div>
+          </div>
         </div>
-        <div class="sb">
-          <div class="sn" id="stat-applied-week">—</div>
-          <div class="sl">This Week</div>
+
+        <button id="discover-btn" class="btn btn-p mb8">
+          <span class="dot"></span>
+          Discover jobs
+        </button>
+        <button id="apply-btn" class="btn btn-g mb8">Apply to Queue</button>
+        <button id="review-btn" class="btn btn-g mb10" style="display:none">Review Scored Jobs</button>
+
+        <hr class="div" />
+
+        <!-- usage -->
+        <div class="uc">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div class="uc-l">AI usage · this week</div>
+            <div class="uc-r" id="usage-reset"></div>
+          </div>
+          <div class="uc-n mt8" id="usage-count">— <span>/ —</span></div>
+          <div class="uc-bt" style="margin-top:8px"><div class="uc-bf" id="usage-bar" style="width:0%"></div></div>
         </div>
-        <div class="sb">
-          <div class="sn" id="stat-queue">—</div>
-          <div class="sl">Queue</div>
+        <p id="usage-error" class="err"></p>
+
+        <!-- upgrade card (free users) -->
+        <div class="up" id="upgrade-card" style="display:none">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
+            <div class="up-t">Upgrade to <em>Pro</em></div>
+            <span style="font-family:var(--mono);font-size:9px;color:var(--amber);text-transform:uppercase;letter-spacing:.06em">save 17%</span>
+          </div>
+          <div class="up-p">Unlimited applications · unlimited AI scoring · priority support</div>
+          <div class="plan-row">
+            <button class="plan-btn sel" id="plan-monthly">
+              <span class="plan-n">Monthly</span>
+              <span class="plan-p">₹499<span class="plan-p-sub">/mo</span></span>
+            </button>
+            <button class="plan-btn" id="plan-annual">
+              <span class="plan-n">Annual</span>
+              <span class="plan-p">₹4,999<span class="plan-p-sub">/yr</span></span>
+            </button>
+          </div>
+          <p id="billing-error" class="err"></p>
+          <button id="upgrade-btn" class="btn-up">Upgrade now →</button>
         </div>
-      </div>
 
-      <button id="discover-btn" class="btn btn-p mb8">Discover Jobs</button>
-      <button id="apply-btn" class="btn btn-g mb8">Apply to Queue</button>
-      <button id="review-btn" class="btn btn-g mb10" style="display:none">Review Scored Jobs</button>
-
-      <hr class="div" />
-
-      <div class="uc">
-        <div class="uc-l">AI Usage This Week</div>
-        <div class="uc-n" id="usage-count">— <span>/ —</span></div>
-        <div class="uc-bt"><div class="uc-bf" id="usage-bar" style="width:0%"></div></div>
-        <div class="uc-r" id="usage-reset"></div>
-      </div>
-      <p id="usage-error" class="err"></p>
-
-      <div class="up" id="upgrade-card" style="display:none">
-        <div class="up-t">Upgrade to Pro</div>
-        <div class="up-p">Unlimited applications · Unlimited AI scoring</div>
-        <div class="plan-row">
-          <button class="plan-btn sel" id="plan-monthly">
-            <span class="plan-n">Monthly</span><span class="plan-p">₹499/mo</span>
-          </button>
-          <button class="plan-btn" id="plan-annual">
-            <span class="plan-n">Annual</span><span class="plan-p">₹4,999/yr</span>
-          </button>
+        <!-- pro status card -->
+        <div class="uc" id="pro-status-card" style="display:none">
+          <div class="uc-l">Plan</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <span class="pro-badge">Pro</span>
+            <span id="pro-plan-label" style="font-size:12px;color:var(--cream)"></span>
+          </div>
+          <div class="uc-r" id="pro-expires"></div>
         </div>
-        <p id="billing-error" class="err"></p>
-        <button id="upgrade-btn" class="btn-up">Upgrade Now →</button>
-      </div>
-
-      <div class="uc" id="pro-status-card" style="display:none">
-        <div class="uc-l">Plan</div>
-        <div style="display:flex;align-items:center;gap:7px;margin-top:4px">
-          <span class="pro-badge">Pro</span>
-          <span id="pro-plan-label" style="font-size:11px;color:var(--muted)"></span>
-        </div>
-        <div class="uc-r" id="pro-expires"></div>
       </div>
     </div>
 
-    <!-- ─── DISCOVERING ──────────────────────────────────── -->
+    <!-- ─── DISCOVERING ───────────────────────────────────── -->
     <div id="discovering-panel" class="panel">
-      <p class="ph-hd">Discovering Jobs</p>
-      <p class="ph-sub" id="disc-keyword-label">Scanning LinkedIn…</p>
+      <div style="padding:16px">
+        <div class="live-label">
+          <span class="dot dot-blink"></span>
+          crawling linkedin
+        </div>
+        <div class="ph-hd">Discovering jobs.</div>
+        <p class="ph-sub" id="disc-keyword-label">Scanning LinkedIn…</p>
 
-      <div class="big-n" id="disc-found">0</div>
-      <div class="big-l mb8">jobs found</div>
+        <div style="display:flex;align-items:baseline;gap:14px;margin:20px 0 0">
+          <div class="big-n" id="disc-found">0</div>
+          <div class="big-l">jobs<br>found</div>
+        </div>
 
-      <div class="pt"><div class="pf" id="disc-progress-bar" style="width:0%"></div></div>
-      <p class="tx mb10" id="disc-progress-label">keyword 0 of 0</p>
+        <div style="margin-top:20px">
+          <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--cream2);margin-bottom:6px">
+            <span id="disc-progress-label">keyword 0 of 0</span>
+          </div>
+          <div class="pt"><div class="pf" id="disc-progress-bar" style="width:0%"></div></div>
+        </div>
 
-      <button id="stop-discovery-btn" class="btn btn-d btn-sm">Stop Discovery</button>
-    </div>
-
-    <!-- ─── ENRICHING ────────────────────────────────────── -->
-    <div id="enriching-panel" class="panel">
-      <p class="ph-hd">Reading Descriptions</p>
-      <p class="ph-sub">Visiting each job page for the full description.</p>
-
-      <div class="cnt-row">
-        <span class="big-n" id="enrich-current">0</span>
-        <span class="cnt-sep">/</span>
-        <span class="cnt-tot" id="enrich-total">0</span>
+        <button id="stop-discovery-btn" class="btn btn-d mt10">Stop discovery</button>
       </div>
-      <div class="big-l mb8">jobs enriched</div>
-
-      <div class="pt"><div class="pf" id="enrich-progress-bar" style="width:0%"></div></div>
-
-      <button id="stop-enriching-btn" class="btn btn-d btn-sm mt10">Stop</button>
     </div>
 
-    <!-- ─── SCORING ──────────────────────────────────────── -->
+    <!-- ─── ENRICHING ─────────────────────────────────────── -->
+    <div id="enriching-panel" class="panel">
+      <div style="padding:16px">
+        <div class="live-label">
+          <span class="dot dot-blink"></span>
+          reading descriptions
+        </div>
+        <div class="ph-hd">Reading job posts.</div>
+        <p class="ph-sub">Visiting each page for the full description.</p>
+
+        <div class="cnt-row" style="margin-top:20px">
+          <span class="big-n" id="enrich-current">0</span>
+          <span class="cnt-sep">/</span>
+          <span class="cnt-tot" id="enrich-total">0</span>
+        </div>
+        <div class="big-l mb8">jobs enriched</div>
+
+        <div class="pt"><div class="pf" id="enrich-progress-bar" style="width:0%"></div></div>
+
+        <button id="stop-enriching-btn" class="btn btn-d btn-sm mt10">Stop</button>
+      </div>
+    </div>
+
+    <!-- ─── SCORING ───────────────────────────────────────── -->
     <div id="scoring-panel" class="panel">
-      <div class="spin-w">
-        <div class="spin"></div>
-        <p class="ph-hd">Scoring Jobs</p>
-        <p class="ph-sub">Matching descriptions against your profile with AI.</p>
+      <div style="padding:28px 16px 20px;text-align:center">
+        <div style="position:relative;width:64px;height:64px;margin:0 auto 16px">
+          <svg class="spin-svg" viewBox="0 0 64 64" width="64" height="64">
+            <circle cx="32" cy="32" r="26" stroke="#1F1F26" stroke-width="3" fill="none"/>
+            <circle cx="32" cy="32" r="26" stroke="#FF8A1F" stroke-width="3" fill="none"
+              stroke-linecap="round" stroke-dasharray="50 200"/>
+          </svg>
+        </div>
+        <div class="ph-hd">Scoring jobs.</div>
+        <p class="ph-sub">Matching all descriptions against your profile with AI.</p>
         <p class="tx">Usually 1–2 minutes.</p>
       </div>
     </div>
 
-    <!-- ─── READY ────────────────────────────────────────── -->
+    <!-- ─── READY ─────────────────────────────────────────── -->
     <div id="ready-panel" class="panel">
-      <p class="ph-hd">Discovery Complete</p>
+      <div style="padding:16px">
+        <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l4 4L19 6"/></svg>
+          complete
+        </div>
+        <div class="ph-hd">Discovery complete.</div>
 
-      <div class="rc mt10">
-        <div class="rr"><span class="rl">Discovered</span><span class="rv" id="ready-discovered">—</span></div>
-        <div class="rr"><span class="rl">After filter</span><span class="rv" id="ready-filtered">—</span></div>
-        <div class="rr"><span class="rl">Scored</span><span class="rv" id="ready-scored">—</span></div>
-        <div class="rr"><span class="rl">Auto-approved</span><span class="rv rv-g" id="ready-approved">—</span></div>
-        <div class="rr"><span class="rl">Needs review</span><span class="rv rv-a" id="ready-needs-review">—</span></div>
+        <div class="rc mt10">
+          <div class="rr"><span class="rl">Discovered</span><span class="rv"    id="ready-discovered">—</span></div>
+          <div class="rr"><span class="rl">After filter</span><span class="rv"  id="ready-filtered">—</span></div>
+          <div class="rr"><span class="rl">Scored</span><span class="rv"        id="ready-scored">—</span></div>
+          <div class="rr"><span class="rl">Auto-approved</span><span class="rv rv-g" id="ready-approved">—</span></div>
+          <div class="rr"><span class="rl">Needs review</span><span class="rv rv-a" id="ready-needs-review">—</span></div>
+        </div>
+
+        <button id="start-apply-btn" class="btn btn-p mb8">Start applying →</button>
+        <button id="ready-back-btn" class="btn btn-g btn-sm">Back to dashboard</button>
       </div>
-
-      <button id="start-apply-btn" class="btn btn-p mb8">Start Applying</button>
-      <button id="ready-back-btn" class="btn btn-g btn-sm">Back to Dashboard</button>
     </div>
 
-    <!-- ─── APPLYING ─────────────────────────────────────── -->
+    <!-- ─── APPLYING ──────────────────────────────────────── -->
     <div id="applying-panel" class="panel">
-      <p class="ph-hd">Applying</p>
+      <div style="padding:16px">
+        <div class="live-label" style="margin-bottom:10px">
+          <span class="dot dot-blink"></span>
+          applying
+        </div>
 
-      <div class="jc" id="current-job-card" style="display:none">
-        <div class="jc-co" id="apply-company">—</div>
-        <div class="jc-ti" id="apply-title">—</div>
-        <div class="jc-sc" id="apply-score">Score —</div>
-      </div>
+        <div class="jc" id="current-job-card" style="display:none">
+          <div class="jc-co" id="apply-company">—</div>
+          <div class="jc-ti" id="apply-title">—</div>
+          <div class="jc-sc" id="apply-score">Score —</div>
+        </div>
 
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-        <span class="tx">Progress</span>
-        <span style="font-family:var(--mono);font-size:11px;font-weight:700">
-          <span id="apply-current">0</span><span style="color:var(--xmuted)"> / </span><span id="apply-total">0</span>
-        </span>
-      </div>
-      <div class="pt"><div class="pf" id="apply-progress-bar" style="width:0%"></div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:10px;margin-bottom:6px">
+          <span style="color:var(--mute);text-transform:uppercase;letter-spacing:.06em">Progress</span>
+          <span>
+            <span style="color:var(--cream);font-weight:700" id="apply-current">0</span>
+            <span style="color:var(--mute)"> / </span>
+            <span id="apply-total">0</span>
+          </span>
+        </div>
+        <div class="pt"><div class="pf" id="apply-progress-bar" style="width:0%"></div></div>
 
-      <div style="display:flex;gap:14px;margin:7px 0 10px;font-size:10px;color:var(--muted)">
-        <span>Applied <span style="font-family:var(--mono);font-weight:700;color:var(--green)" id="apply-applied">0</span></span>
-        <span>Skipped <span style="font-family:var(--mono);font-weight:700" id="apply-skipped">0</span></span>
-        <span>Failed <span style="font-family:var(--mono);font-weight:700" id="apply-failed">0</span></span>
-      </div>
+        <div class="mini-stats">
+          <div class="mini-stat">
+            <div class="mini-stat-l">Applied</div>
+            <div class="mini-stat-n msc-g" id="apply-applied">0</div>
+          </div>
+          <div class="mini-stat">
+            <div class="mini-stat-l">Skipped</div>
+            <div class="mini-stat-n msc-c" id="apply-skipped">0</div>
+          </div>
+          <div class="mini-stat">
+            <div class="mini-stat-l">Failed</div>
+            <div class="mini-stat-n msc-r" id="apply-failed">0</div>
+          </div>
+        </div>
 
-      <p id="apply-last-error" style="display:none;font-size:10px;color:var(--red);background:var(--red-lt);border:1px solid var(--red-bd);border-radius:4px;padding:5px 8px;margin-bottom:8px;line-height:1.4"></p>
+        <p id="apply-last-error" style="display:none"></p>
 
-      <div class="btn-row">
-        <button id="pause-apply-btn" class="btn btn-g btn-sm">Pause</button>
-        <button id="stop-apply-btn" class="btn btn-d btn-sm">Stop</button>
+        <div class="btn-row">
+          <button id="pause-apply-btn" class="btn btn-g btn-sm">Pause</button>
+          <button id="stop-apply-btn" class="btn btn-d btn-sm">Stop</button>
+        </div>
       </div>
     </div>
 
     <!-- ─── PAUSED ────────────────────────────────────────── -->
-    <div id="paused-panel" class="panel tc" style="padding-top:24px;padding-bottom:18px">
-      <div style="font-size:26px;margin-bottom:7px;opacity:.6">⏸</div>
-      <p class="ph-hd">Paused</p>
-      <p class="ph-sub">Auto-apply session is paused.</p>
-      <button id="resume-apply-btn" class="btn btn-p mb8">Resume</button>
-      <button id="paused-stop-btn" class="btn btn-d btn-sm">End Session</button>
+    <div id="paused-panel" class="panel">
+      <div style="padding:40px 16px 24px;text-align:center">
+        <div style="display:inline-flex;width:48px;height:48px;align-items:center;justify-content:center;border-radius:50%;background:var(--ink2);border:1px solid var(--line2);margin-bottom:20px">
+          <div style="display:flex;gap:4px">
+            <div style="width:4px;height:16px;background:var(--cream2);border-radius:2px"></div>
+            <div style="width:4px;height:16px;background:var(--cream2);border-radius:2px"></div>
+          </div>
+        </div>
+        <div class="ph-hd">Paused.</div>
+        <p class="ph-sub">Auto-apply is paused. Stats are saved — pick up anytime.</p>
+        <button id="resume-apply-btn" class="btn btn-p mb8">Resume applying</button>
+        <button id="paused-stop-btn" class="btn btn-d btn-sm" style="background:transparent;border:none;color:var(--red)">End session</button>
+      </div>
+    </div>
+
+    <!-- ─── REVIEW ────────────────────────────────────────── -->
+    <div id="review-panel" class="panel panel-s">
+      <div style="padding:16px">
+        <div class="ph-hd">Scored jobs.</div>
+        <p class="ph-sub" id="review-subtitle">Loading…</p>
+        <div id="review-job-list"></div>
+        <p id="review-error" class="err"></p>
+        <div class="btn-row mt10">
+          <button id="review-back-btn" class="btn btn-g btn-sm">Back</button>
+          <button id="approve-all-btn" class="btn btn-p btn-sm">Approve all</button>
+        </div>
+      </div>
     </div>
 
     <!-- ─── COMPLETE ──────────────────────────────────────── -->
-    <!-- ─── REVIEW ─────────────────────────────────────────────────────────────── -->
-    <div id="review-panel" class="panel panel-s">
-      <p class="ph-hd">Scored Jobs</p>
-      <p class="ph-sub" id="review-subtitle">Loading…</p>
-      <div id="review-job-list"></div>
-      <p id="review-error" class="err"></p>
-      <div class="btn-row mt10">
-        <button id="review-back-btn" class="btn btn-g btn-sm">Back</button>
-        <button id="approve-all-btn" class="btn btn-p btn-sm">Approve All</button>
-      </div>
-    </div>
-
-    <div id="complete-panel" class="panel tc" style="padding-top:20px;padding-bottom:16px">
-      <div style="font-size:30px;margin-bottom:7px;line-height:1" id="complete-icon">✓</div>
-      <p class="ph-hd" id="complete-title">Session Complete</p>
-
-      <div class="rc mt10" style="text-align:left">
-        <div class="rr"><span class="rl">Applied</span><span class="rv rv-g" id="complete-applied">0</span></div>
-        <div class="rr"><span class="rl">Skipped</span><span class="rv" id="complete-skipped">0</span></div>
-        <div class="rr"><span class="rl">Failed</span><span class="rv" id="complete-failed">0</span></div>
-        <div class="rr" id="complete-reason-row" style="display:none">
-          <span class="rl">Stopped</span>
-          <span class="rv" id="complete-reason">—</span>
+    <div id="complete-panel" class="panel">
+      <div style="padding:20px 16px;text-align:center">
+        <div class="complete-icon-ring success" id="complete-icon-ring">
+          <span id="complete-icon" style="font-family:'Instrument Serif',Georgia,serif;font-size:22px;line-height:1;color:inherit">✓</span>
         </div>
-      </div>
+        <div class="ph-hd" id="complete-title">Session complete.</div>
+        <p class="ph-sub" id="complete-subtitle" style="margin-bottom:0">Nice. Time to stretch.</p>
 
-      <button id="complete-discover-btn" class="btn btn-p mb8">Discover More</button>
-      <button id="complete-idle-btn" class="btn btn-g btn-sm">Back to Dashboard</button>
+        <div class="rc mt10" style="text-align:left">
+          <div class="rr"><span class="rl">Applied</span><span class="rv rv-g" id="complete-applied">0</span></div>
+          <div class="rr"><span class="rl">Skipped</span><span class="rv"      id="complete-skipped">0</span></div>
+          <div class="rr"><span class="rl">Failed</span><span class="rv"       id="complete-failed">0</span></div>
+          <div class="rr" id="complete-reason-row" style="display:none">
+            <span class="rl">Stopped</span>
+            <span class="rv" id="complete-reason" style="color:var(--red);font-size:11px">—</span>
+          </div>
+        </div>
+
+        <button id="complete-discover-btn" class="btn btn-p mb8">Discover more</button>
+        <button id="complete-idle-btn" class="btn btn-g btn-sm">Back to dashboard</button>
+      </div>
     </div>
 
   </div><!-- #app-view -->
