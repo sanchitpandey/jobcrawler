@@ -89,15 +89,21 @@ export function Applications() {
 
       {/* Error */}
       {error && (
-        <div className="mb-4 border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3 font-mono text-xs text-red-soft">
-          {error}
+        <div className="mb-4 flex items-center justify-between gap-4 border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3">
+          <span className="font-mono text-xs text-red-soft">{error}</span>
+          <button
+            onClick={fetchApps}
+            className="shrink-0 h-7 px-3 rounded-lg border border-red-soft/30 text-red-soft text-xs hover:bg-red-soft/10 transition"
+          >
+            Retry
+          </button>
         </div>
       )}
 
       {/* Table */}
       <div className="border border-line2 rounded-xl overflow-hidden">
-        {/* Table header */}
-        <div className="grid grid-cols-[1fr_140px_60px_90px_80px] gap-4 px-5 py-3 border-b border-line2 bg-ink2/40">
+        {/* Table header (desktop only) */}
+        <div className="hidden sm:grid grid-cols-[1fr_140px_60px_90px_80px] gap-4 px-5 py-3 border-b border-line2 bg-ink2/40">
           {['Job', 'Company', 'Score', 'Status', 'When'].map((h) => (
             <span key={h} className="font-mono text-[10px] uppercase tracking-wider text-mute">
               {h}

@@ -13,17 +13,17 @@ export interface AppRowItem {
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  applied: 'bg-green/15 text-green border-green/20',
-  approved: 'bg-amber/15 text-amber border-amber/20',
-  applying: 'bg-amber/15 text-amber border-amber/20',
-  scored: 'bg-blue-400/15 text-blue-300 border-blue-400/20',
-  interview: 'bg-purple-400/15 text-purple-300 border-purple-400/20',
-  offer: 'bg-green/25 text-green border-green/30',
-  rejected: 'bg-red-soft/15 text-red-soft border-red-soft/20',
-  skipped: 'bg-line2 text-mute border-line2',
-  failed: 'bg-red-soft/15 text-red-soft border-red-soft/20',
+  applied:    'bg-green/15 text-green border-green/20',
+  approved:   'bg-amber/15 text-amber border-amber/20',
+  applying:   'bg-amber/15 text-amber border-amber/20',
+  scored:     'bg-blue-400/15 text-blue-300 border-blue-400/20',
+  interview:  'bg-purple-400/15 text-purple-300 border-purple-400/20',
+  offer:      'bg-green/25 text-green border-green/30',
+  rejected:   'bg-red-soft/15 text-red-soft border-red-soft/20',
+  skipped:    'bg-line2 text-mute border-line2',
+  failed:     'bg-red-soft/15 text-red-soft border-red-soft/20',
   discovered: 'bg-line2 text-mute border-line2',
-  enriched: 'bg-line2 text-mute border-line2',
+  enriched:   'bg-line2 text-mute border-line2',
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -54,37 +54,55 @@ export function timeAgo(iso: string): string {
 }
 
 export function ApplicationRow({ app }: { app: AppRowItem }) {
+  const titleEl = app.url ? (
+    <a
+      href={app.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-sm text-cream hover:text-amber transition-colors truncate block"
+    >
+      {app.title ?? '—'}
+    </a>
+  ) : (
+    <span className="text-sm text-cream truncate block">{app.title ?? '—'}</span>
+  )
+
   return (
-    <div className="grid grid-cols-[1fr_140px_60px_90px_80px] gap-4 px-5 py-3.5 hover:bg-ink2/30 transition-colors items-center">
-      <div className="min-w-0">
-        {app.url ? (
-          <a
-            href={app.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-cream hover:text-amber transition-colors truncate block"
-          >
-            {app.title ?? '—'}
-          </a>
-        ) : (
-          <span className="text-sm text-cream truncate block">{app.title ?? '—'}</span>
-        )}
-        {app.location && (
-          <span className="font-mono text-[11px] text-mute">{app.location}</span>
-        )}
+    <>
+      {/* Desktop row */}
+      <div className="hidden sm:grid grid-cols-[1fr_140px_60px_90px_80px] gap-4 px-5 py-3.5 hover:bg-ink2/30 transition-colors items-center">
+        <div className="min-w-0">
+          {titleEl}
+          {app.location && (
+            <span className="font-mono text-[11px] text-mute">{app.location}</span>
+          )}
+        </div>
+        <span className="text-sm text-cream2 truncate">{app.company ?? '—'}</span>
+        <div className="flex items-center">
+          <ScoreBadge score={app.fit_score !== null ? Math.round(app.fit_score) : null} />
+        </div>
+        <StatusBadge status={app.status} />
+        <span className="font-mono text-[11px] text-mute">
+          {timeAgo(app.applied_at ?? app.updated_at)}
+        </span>
       </div>
 
-      <span className="text-sm text-cream2 truncate">{app.company ?? '—'}</span>
-
-      <div className="flex items-center">
-        <ScoreBadge score={app.fit_score !== null ? Math.round(app.fit_score) : null} />
+      {/* Mobile card */}
+      <div className="sm:hidden px-4 py-3.5 hover:bg-ink2/30 transition-colors flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {titleEl}
+          <p className="font-mono text-[11px] text-mute mt-0.5">
+            {[app.company, app.location].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <StatusBadge status={app.status} />
+          <div className="flex items-center gap-2">
+            <ScoreBadge score={app.fit_score !== null ? Math.round(app.fit_score) : null} />
+            <span className="font-mono text-[10px] text-mute">{timeAgo(app.applied_at ?? app.updated_at)}</span>
+          </div>
+        </div>
       </div>
-
-      <StatusBadge status={app.status} />
-
-      <span className="font-mono text-[11px] text-mute">
-        {timeAgo(app.applied_at ?? app.updated_at)}
-      </span>
-    </div>
+    </>
   )
 }

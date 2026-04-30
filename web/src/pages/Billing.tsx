@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RazorpayButton } from '../components/RazorpayButton'
+import { useToast } from '../components/Toast'
 
 interface BillingStatus {
   tier: string
@@ -43,6 +44,7 @@ function CheckIcon() {
 }
 
 export function Billing() {
+  const { toast } = useToast()
   const { user } = useAuth()
   const [status, setStatus] = useState<BillingStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -70,8 +72,14 @@ export function Billing() {
       </div>
 
       {error && (
-        <div className="mb-5 border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3 font-mono text-xs text-red-soft">
-          {error}
+        <div className="mb-5 flex items-center justify-between gap-4 border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3">
+          <span className="font-mono text-xs text-red-soft">{error}</span>
+          <button
+            onClick={load}
+            className="shrink-0 h-7 px-3 rounded-lg border border-red-soft/30 text-red-soft text-xs hover:bg-red-soft/10 transition"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -150,7 +158,7 @@ export function Billing() {
       {!isPro && (
         <div className="space-y-4">
           <p className="font-mono text-[11px] uppercase tracking-wider text-cream2">Upgrade to Pro</p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {PLANS.map((plan) => (
               <div
                 key={plan.key}
@@ -189,7 +197,7 @@ export function Billing() {
                   label={`Get ${plan.label}`}
                   email={email}
                   primary={plan.primary}
-                  onSuccess={() => { load() }}
+                  onSuccess={() => { toast('Payment successful — welcome to Pro!', 'success'); load() }}
                   onError={(msg) => setError(msg)}
                 />
               </div>

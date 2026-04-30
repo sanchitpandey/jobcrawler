@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { useToast } from '../components/Toast'
 
 // ── API shapes ─────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ interface SearchPrefShape {
 
 interface CompletenessData {
   percent: number
-  missing: string[]
+  missing?: string[]
 }
 
 // ── Form state ─────────────────────────────────────────────────────────────────
@@ -121,6 +122,41 @@ const EMPTY: FormState = {
   avoid_roles: '',
   auto_apply_threshold: 75,
   max_daily_applications: 15,
+}
+
+// ── Completeness ──────────────────────────────────────────────────────────────
+
+const COMPLETENESS_FIELDS: { key: keyof FormState; label: string }[] = [
+  { key: 'name',                 label: 'Full name' },
+  { key: 'phone',                label: 'Phone' },
+  { key: 'linkedin_url',         label: 'LinkedIn URL' },
+  { key: 'total_experience',     label: 'Years of experience' },
+  { key: 'current_title',        label: 'Current job title' },
+  { key: 'work_authorization',   label: 'Work authorization' },
+  { key: 'degree',               label: 'Degree' },
+  { key: 'college',              label: 'College' },
+  { key: 'current_ctc',          label: 'Current CTC' },
+  { key: 'expected_ctc',         label: 'Expected CTC' },
+  { key: 'skills_text',          label: 'Technical skills' },
+  { key: 'candidate_summary',    label: 'Candidate summary' },
+  { key: 'experience_highlights',label: 'Experience highlights' },
+  { key: 'preferred_roles',      label: 'Target job titles' },
+  { key: 'target_locations',     label: 'Target locations' },
+]
+
+function computeCompleteness(form: FormState): CompletenessData {
+  const missing: string[] = []
+  let filled = 0
+  for (const { key, label } of COMPLETENESS_FIELDS) {
+    const val = form[key]
+    const ok = typeof val === 'string' ? val.trim().length > 0 : Boolean(val)
+    if (ok) filled++
+    else missing.push(label)
+  }
+  return {
+    percent: Math.round((filled / COMPLETENESS_FIELDS.length) * 100),
+    missing,
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -322,10 +358,10 @@ const ALL_SECTIONS = [
 ]
 
 export function Profile() {
+  const { toast } = useToast()
   const { user } = useAuth()
   const [form, setForm] = useState<FormState>(EMPTY)
   const [prefState, setPrefState] = useState<SearchPrefShape | null>(null)
-  const [completeness, setCompleteness] = useState<CompletenessData | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set(ALL_SECTIONS))
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -387,15 +423,12 @@ export function Profile() {
         }))
       } catch { /* no prefs yet */ }
 
-      try {
-        const c = await api.get<CompletenessData>('/profile/completeness')
-        setCompleteness(c)
-      } catch { /* endpoint may not exist */ }
-
       setLoaded(true)
     }
     load()
   }, [])
+
+  const completeness = useMemo(() => computeCompleteness(form), [form])
 
   function set(k: keyof FormState, v: FormState[keyof FormState]) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -465,16 +498,13 @@ export function Profile() {
         }),
       ])
 
-      // Refresh completeness
-      try {
-        const c = await api.get<CompletenessData>('/profile/completeness')
-        setCompleteness(c)
-      } catch { /* ignore */ }
-
       setSaved(true)
+      toast('Profile saved', 'success')
       setTimeout(() => setSaved(false), 3000)
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Save failed')
+      const msg = e instanceof Error ? e.message : 'Save failed'
+      setSaveError(msg)
+      toast(msg, 'error')
     } finally {
       setSaving(false)
     }
@@ -525,39 +555,36 @@ export function Profile() {
       )}
 
       {/* Completeness bar */}
-      {completeness && (
-        <div className="mb-6 border border-line2 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[11px] uppercase tracking-wider text-cream2">
-              Profile Completeness
-            </span>
-            <span className="font-mono text-sm text-amber">{completeness.percent}%</span>
-          </div>
-          <div className="h-2 bg-line2 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${
-                completeness.percent >= 80 ? 'bg-green' : 'bg-amber'
-              }`}
-              style={{ width: `${completeness.percent}%` }}
-            />
-          </div>
-          {completeness.missing.length > 0 && (
-            <p className="text-xs text-cream2">
-              Your profile is <span className="text-amber">{completeness.percent}%</span> complete.
-              {' '}Fill in{' '}
-              <span className="text-cream">{completeness.missing.slice(0, 3).join(', ')}</span>
-              {completeness.missing.length > 3 ? ` and ${completeness.missing.length - 3} more` : ''}
-              {' '}to improve match quality.
-            </p>
-          )}
+      <div className="mb-6 border border-line2 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[11px] uppercase tracking-wider text-cream2">
+            Profile Completeness
+          </span>
+          <span className="font-mono text-sm text-amber">{completeness.percent}%</span>
         </div>
-      )}
+        <div className="h-2 bg-line2 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${
+              completeness.percent >= 80 ? 'bg-green' : 'bg-amber'
+            }`}
+            style={{ width: `${completeness.percent}%` }}
+          />
+        </div>
+        {completeness.missing && completeness.missing.length > 0 && (
+          <p className="text-xs text-cream2">
+            Fill in{' '}
+            <span className="text-cream">{completeness.missing.slice(0, 3).join(', ')}</span>
+            {completeness.missing.length > 3 ? ` and ${completeness.missing.length - 3} more` : ''}
+            {' '}to improve match quality.
+          </p>
+        )}
+      </div>
 
       {/* Sections */}
       <div className="space-y-3">
         {/* Personal Information */}
         <Accordion id="personal" title="Personal Information" open={open.has('personal')} onToggle={toggleSection}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Full Name</Label>
               <Input value={form.name} onChange={(v) => set('name', v)} placeholder="Sanchit Pandey" />
@@ -567,7 +594,7 @@ export function Profile() {
               <Input value={user?.email ?? ''} onChange={() => {}} readOnly />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Phone</Label>
               <Input type="tel" value={form.phone} onChange={(v) => set('phone', v)} placeholder="+91 98765 43210" />
@@ -581,7 +608,7 @@ export function Profile() {
             <Label>LinkedIn URL</Label>
             <Input type="url" value={form.linkedin_url} onChange={(v) => set('linkedin_url', v)} placeholder="https://linkedin.com/in/yourname" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>GitHub URL</Label>
               <Input type="url" value={form.github_url} onChange={(v) => set('github_url', v)} placeholder="https://github.com/yourname" />
@@ -595,7 +622,7 @@ export function Profile() {
 
         {/* Experience */}
         <Accordion id="experience" title="Experience" open={open.has('experience')} onToggle={toggleSection}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Years of Experience</Label>
               <Input value={form.total_experience} onChange={(v) => set('total_experience', v)} placeholder="3 years" />
@@ -605,7 +632,7 @@ export function Profile() {
               <Input value={form.notice_period} onChange={(v) => set('notice_period', v)} placeholder="immediate / 30 days" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Current Job Title</Label>
               <Input value={form.current_title} onChange={(v) => set('current_title', v)} placeholder="ML Engineer" />
@@ -652,7 +679,7 @@ export function Profile() {
             <Label>College / University</Label>
             <Input value={form.college} onChange={(v) => set('college', v)} placeholder="BITS Pilani" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Graduation Year</Label>
               <Input value={form.graduation_year} onChange={(v) => set('graduation_year', v)} placeholder="2025" />
@@ -666,7 +693,7 @@ export function Profile() {
 
         {/* Compensation */}
         <Accordion id="compensation" title="Compensation" open={open.has('compensation')} onToggle={toggleSection}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Current CTC / Salary</Label>
               <Input value={form.current_ctc} onChange={(v) => set('current_ctc', v)} placeholder="18 LPA" />
@@ -676,7 +703,7 @@ export function Profile() {
               <Input value={form.expected_ctc} onChange={(v) => set('expected_ctc', v)} placeholder="25 LPA" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Minimum Acceptable (LPA)</Label>
               <Input
@@ -743,7 +770,7 @@ export function Profile() {
             />
             <p className="font-mono text-[10px] text-mute">Comma-separated. Used as LinkedIn search keywords.</p>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Target Locations</Label>
               <Input value={form.target_locations} onChange={(v) => set('target_locations', v)} placeholder="Bengaluru, Remote" />
@@ -792,7 +819,7 @@ export function Profile() {
 
         {/* Blacklists */}
         <Accordion id="blacklists" title="Blacklists" open={open.has('blacklists')} onToggle={toggleSection}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Companies to Avoid</Label>
               <Input

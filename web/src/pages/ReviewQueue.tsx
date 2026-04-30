@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
 import { JobCard, type JobCardItem, type JobCardTab } from '../components/JobCard'
+import { useToast } from '../components/Toast'
 
 type AppItem = JobCardItem
 
@@ -10,6 +11,7 @@ interface ListResp {
 }
 
 export function ReviewQueue() {
+  const { toast } = useToast()
   const [tab, setTab] = useState<JobCardTab>('scored')
   const [items, setItems] = useState<AppItem[]>([])
   const [total, setTotal] = useState(0)
@@ -37,11 +39,13 @@ export function ReviewQueue() {
   function removeItem(id: string) {
     setItems((prev) => prev.filter((a) => a.id !== id))
     setTotal((t) => Math.max(0, t - 1))
+    toast('Job rejected', 'error')
   }
 
   function moveToApproved(id: string) {
     setItems((prev) => prev.filter((a) => a.id !== id))
     setTotal((t) => Math.max(0, t - 1))
+    toast('Job approved — added to apply queue', 'success')
   }
 
   return (
@@ -79,8 +83,14 @@ export function ReviewQueue() {
 
       {/* Error */}
       {error && (
-        <div className="mb-4 border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3 font-mono text-xs text-red-soft">
-          {error}
+        <div className="mb-4 flex items-center justify-between gap-4 border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3">
+          <span className="font-mono text-xs text-red-soft">{error}</span>
+          <button
+            onClick={fetchItems}
+            className="shrink-0 h-7 px-3 rounded-lg border border-red-soft/30 text-red-soft text-xs hover:bg-red-soft/10 transition"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -92,6 +102,7 @@ export function ReviewQueue() {
             onClick={async () => {
               try {
                 await api.post('/discovery/approve-batch', { min_score: 75 })
+                toast('All qualifying jobs approved', 'success')
                 await fetchItems()
               } catch (e) {
                 setError(e instanceof Error ? e.message : 'Bulk approve failed')
