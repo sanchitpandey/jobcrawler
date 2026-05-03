@@ -113,7 +113,7 @@ function elementIsUsableDescription(el: Element): boolean {
   return linkCount + buttonCount < 8
 }
 
-function extractJobDescription(): string {
+export function extractJobDescription(): string {
   for (const selector of JD_SELECTORS.description) {
     const el = document.querySelector(selector)
     const text = cleanText(el?.textContent ?? '')
@@ -145,7 +145,7 @@ function extractJobDescription(): string {
   return ''
 }
 
-function extractJobDetails(): JobDetails {
+export function extractJobDetails(): JobDetails {
   const match = window.location.href.match(/\/jobs\/view\/(\d+)/)
   const jobId = match?.[1] ?? ''
 

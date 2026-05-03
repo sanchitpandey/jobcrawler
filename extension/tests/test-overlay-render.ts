@@ -142,9 +142,9 @@ describe("showReviewPanel — rendering", () => {
 
   it("renders job summary header with company and title", () => {
     void showReviewPanel(jobInfo, [field("Email")], [answer("Email", "x@y.com")]);
-    const header = __getActiveShadowRoot()!.querySelector(".jc-job")!;
-    expect(header.textContent).toContain("Google");
-    expect(header.textContent).toContain("ML Engineer");
+    const shadow = __getActiveShadowRoot()!;
+    expect(shadow.querySelector(".jc-job-title")!.textContent).toContain("ML Engineer");
+    expect(shadow.querySelector(".jc-job-meta")!.textContent).toContain("Google");
   });
 
   it("renders summary footer counts", () => {

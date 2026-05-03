@@ -97,6 +97,7 @@ vi.mock("../src/overlay/overlay.js", () => ({
   hideOverlay: () => undefined,
   showScoreBadge: () => undefined,
   removeOverlay: () => undefined,
+  removePanel: () => undefined,
   showReviewPanel: (
     _job: unknown,
     _fields: { label: string }[],

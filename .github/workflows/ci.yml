@@ -23,6 +23,7 @@ jobs:
       REDIS_URL: ""
       GROQ_API_KEY: ""
       OPENROUTER_API_KEY: ""
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - uses: actions/checkout@v4

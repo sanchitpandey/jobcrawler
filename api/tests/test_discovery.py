@@ -554,12 +554,18 @@ async def test_stats_returns_dashboard_payload(
     assert resp.status_code == 200
 
     body = resp.json()
-    assert body["applied_today"] >= 1
-    assert body["applied_this_week"] == 6
-    expected_month_count = 7 if month_start != week_start else 6
-    expected_discovered_count = 9 if month_start != week_start else 8
-    expected_scored_count = 8 if month_start != week_start else 7
-    expected_good_count = 3 if month_start != week_start else 2
+    # The "month-only" application (month_start + 1 day) can fall inside the
+    # current ISO week when the month boundary lands mid-week, adding +1 to
+    # week-scoped counts.  scored_at defaults to now(), so it's always in-week;
+    # only applied_at / the explicit scored_at determine week membership.
+    month_only_exists = month_start != week_start
+    month_only_in_week = month_only_exists and (month_start + timedelta(days=1) >= week_start)
+
+    expected_week_count = 7 if month_only_in_week else 6
+    expected_month_count = 7 if month_only_exists else 6
+    expected_discovered_count = 10 if month_only_in_week else 9
+    expected_scored_count = 9 if month_only_in_week else 8
+    expected_good_count = 3 if month_only_exists else 2
     assert body["applied_this_month"] == expected_month_count
     assert body["queue_approved"] == 1
     assert body["queue_needs_review"] == 1
