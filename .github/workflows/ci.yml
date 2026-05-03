@@ -31,9 +31,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install setuptools
-        run: pip install --upgrade "setuptools>=65"
+          cache: pip
+          cache-dependency-path: api/requirements.txt
 
       - name: Install dependencies
         run: pip install -r api/requirements.txt pytest pytest-asyncio anyio httpx aiosqlite

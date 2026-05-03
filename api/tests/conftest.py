@@ -5,6 +5,14 @@ Every async fixture creates a fresh in-memory SQLite database so tests are
 fully isolated with no shared state between them.
 """
 
+import sys
+from unittest.mock import MagicMock
+
+# razorpay==1.4.2 imports pkg_resources (setuptools) only to read its own version.
+# Stub it out so the test suite runs on Python 3.12 without setuptools installed.
+if "pkg_resources" not in sys.modules:
+    sys.modules["pkg_resources"] = MagicMock()
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
