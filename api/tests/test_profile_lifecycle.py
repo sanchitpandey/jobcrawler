@@ -1,5 +1,7 @@
 """Integration tests for profile CRUD endpoints."""
 
+from pathlib import Path
+
 import pytest
 from httpx import AsyncClient
 
@@ -54,6 +56,17 @@ ethnicity: "asian"
 candidate_summary: >
   Final-year student at BITS Pilani.
 """
+
+_PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+
+
+@pytest.fixture()
+def upload_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    from api.routes import profiles
+
+    upload_dir = tmp_path / "uploads"
+    monkeypatch.setattr(profiles, "UPLOAD_DIR", upload_dir)
+    return upload_dir
 
 
 # ── GET /profile ──────────────────────────────────────────────────────────────
@@ -119,6 +132,90 @@ async def test_patch_creates_profile_if_missing(
     )
     assert resp.status_code == 200
     assert resp.json()["name"] == "New User"
+
+
+# ── POST/GET /profile/resume ───────────────────────────────────────────────────
+
+async def test_upload_resume(
+    test_client: AsyncClient, user_with_profile: dict, upload_dir_override: Path
+):
+    resp = await test_client.post(
+        "/profile/resume",
+        headers=user_with_profile["headers"],
+        files={"file": ("resume.pdf", _PDF_BYTES, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    saved_path = Path(body["path"])
+    assert body["filename"].endswith(".pdf")
+    assert saved_path.exists()
+    assert saved_path.read_bytes() == _PDF_BYTES
+    assert saved_path.parent == upload_dir_override
+
+    profile_resp = await test_client.get("/profile", headers=user_with_profile["headers"])
+    assert profile_resp.status_code == 200
+    assert profile_resp.json()["resume_path"] == body["path"]
+
+
+async def test_upload_resume_rejects_non_pdf(
+    test_client: AsyncClient, user_with_profile: dict, upload_dir_override: Path
+):
+    resp = await test_client.post(
+        "/profile/resume",
+        headers=user_with_profile["headers"],
+        files={"file": ("resume.txt", b"hello", "text/plain")},
+    )
+    assert resp.status_code == 400
+    assert not upload_dir_override.exists()
+
+
+async def test_upload_resume_rejects_large_files(
+    test_client: AsyncClient, user_with_profile: dict, upload_dir_override: Path
+):
+    large_pdf = b"%PDF-" + b"a" * (5 * 1024 * 1024 + 1)
+    resp = await test_client.post(
+        "/profile/resume",
+        headers=user_with_profile["headers"],
+        files={"file": ("resume.pdf", large_pdf, "application/pdf")},
+    )
+    assert resp.status_code == 413
+    assert not upload_dir_override.exists()
+
+
+async def test_download_resume(
+    test_client: AsyncClient, user_with_profile: dict, upload_dir_override: Path
+):
+    upload_resp = await test_client.post(
+        "/profile/resume",
+        headers=user_with_profile["headers"],
+        files={"file": ("resume.pdf", _PDF_BYTES, "application/pdf")},
+    )
+    assert upload_resp.status_code == 200
+
+    resp = await test_client.get("/profile/resume", headers=user_with_profile["headers"])
+    assert resp.status_code == 200
+    assert resp.content == _PDF_BYTES
+    assert resp.headers["content-type"] == "application/pdf"
+    assert "attachment; filename=" in resp.headers["content-disposition"]
+
+
+async def test_delete_profile_also_deletes_resume_file(
+    test_client: AsyncClient, user_with_profile: dict, upload_dir_override: Path
+):
+    upload_resp = await test_client.post(
+        "/profile/resume",
+        headers=user_with_profile["headers"],
+        files={"file": ("resume.pdf", _PDF_BYTES, "application/pdf")},
+    )
+    saved_path = Path(upload_resp.json()["path"])
+    assert saved_path.exists()
+
+    delete_resp = await test_client.delete("/profile", headers=user_with_profile["headers"])
+    assert delete_resp.status_code == 204
+    assert not saved_path.exists()
+
+    profile_resp = await test_client.get("/profile", headers=user_with_profile["headers"])
+    assert profile_resp.status_code == 404
 
 
 # ── POST /profile/import-markdown ─────────────────────────────────────────────

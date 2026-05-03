@@ -7,11 +7,13 @@ POST /auth/refresh   — exchange refresh token for new access token
 GET  /auth/me        — return current user info
 """
 
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, Field
@@ -19,13 +21,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import get_settings
+from api.logger import get_logger
 from api.models.base import get_db
 from api.models.user import User
+from api.services.email import send_password_reset_email, send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+log = get_logger(__name__)
 
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+_VERIFICATION_CODE_TTL_MINUTES = 15
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -60,6 +66,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class VerifyEmailRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _hash_password(plain: str) -> str:
@@ -68,6 +78,18 @@ def _hash_password(plain: str) -> str:
 
 def _verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+def _generate_verification_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _hash_verification_code(code: str) -> str:
+    return bcrypt.hashpw(code.encode(), bcrypt.gensalt(rounds=14)).decode()
+
+
+def _verify_verification_code(code: str, hashed: str) -> bool:
+    return bcrypt.checkpw(code.encode(), hashed.encode())
 
 
 def _create_token(subject: str, expires_delta: timedelta, token_type: str = "access") -> str:
@@ -126,9 +148,21 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)) -> 
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    user = User(email=req.email, hashed_password=_hash_password(req.password))
+    verification_code = _generate_verification_code()
+    verification_expires = datetime.now(timezone.utc) + timedelta(
+        minutes=_VERIFICATION_CODE_TTL_MINUTES
+    )
+
+    user = User(
+        email=req.email,
+        hashed_password=_hash_password(req.password),
+        is_verified=False,
+        verification_token=_hash_verification_code(verification_code),
+        verification_expires=verification_expires,
+    )
     db.add(user)
     await db.flush()  # get user.id before commit
+    send_verification_email(user.email, verification_code)
 
     return TokenResponse(
         access_token=_create_access_token(user.id),
@@ -185,6 +219,146 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)) -> To
         access_token=_create_access_token(user.id),
         refresh_token=_create_refresh_token(user.id),
     )
+
+
+@router.post("/verify-email", response_model=UserResponse)
+async def verify_email(
+    req: VerifyEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_verified:
+        return current_user
+
+    expires = current_user.verification_expires
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+
+    if (
+        current_user.verification_token is None
+        or expires is None
+        or expires < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired or unavailable.",
+        )
+
+    if not _verify_verification_code(req.code, current_user.verification_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code.",
+        )
+
+    current_user.is_verified = True
+    current_user.verification_token = None
+    current_user.verification_expires = None
+    await db.flush()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
+async def resend_verification(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    if current_user.is_verified:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already verified.")
+
+    verification_code = _generate_verification_code()
+    current_user.verification_token = _hash_verification_code(verification_code)
+    current_user.verification_expires = datetime.now(timezone.utc) + timedelta(
+        minutes=_VERIFICATION_CODE_TTL_MINUTES
+    )
+    await db.flush()
+    send_verification_email(current_user.email, verification_code)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+async def forgot_password(
+    req: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    result = await db.execute(select(User).where(User.email == req.email))
+    user = result.scalar_one_or_none()
+    # Always return 204 — never reveal whether an email is registered.
+    if user and user.is_active:
+        reset_code = _generate_verification_code()
+        user.verification_token = _hash_verification_code(reset_code)
+        user.verification_expires = datetime.now(timezone.utc) + timedelta(
+            minutes=_VERIFICATION_CODE_TTL_MINUTES
+        )
+        await db.flush()
+        send_password_reset_email(user.email, reset_code)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/reset-password", response_model=UserResponse)
+async def reset_password(
+    req: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    # Find user whose reset code matches (brute-force safe: bcrypt check + expiry)
+    # We require the user to pass their email too so we can look them up without
+    # a plaintext token stored in the DB.
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Use POST /auth/reset-password-with-email instead.",
+    )
+
+
+class ResetPasswordWithEmailRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+@router.post("/reset-password-with-email", response_model=UserResponse)
+async def reset_password_with_email(
+    req: ResetPasswordWithEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    result = await db.execute(select(User).where(User.email == req.email))
+    user = result.scalar_one_or_none()
+
+    invalid_exc = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired reset code.",
+    )
+    if user is None or not user.is_active:
+        raise invalid_exc
+
+    expires = user.verification_expires
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+
+    if (
+        user.verification_token is None
+        or expires is None
+        or expires < datetime.now(timezone.utc)
+    ):
+        raise invalid_exc
+
+    if not _verify_verification_code(req.code, user.verification_token):
+        raise invalid_exc
+
+    user.hashed_password = _hash_password(req.new_password)
+    user.verification_token = None
+    user.verification_expires = None
+    await db.flush()
+    await db.refresh(user)
+    return user
 
 
 @router.get("/me", response_model=UserResponse)

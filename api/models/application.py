@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Index, JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.models.base import Base
@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 
 class Application(Base):
     __tablename__ = "applications"
+    __table_args__ = (
+        Index("ix_applications_user_id_scored_at", "user_id", "scored_at"),
+        Index("ix_applications_user_id_status", "user_id", "status"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())

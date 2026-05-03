@@ -40,6 +40,7 @@ class Profile(Base):
     github_url: Mapped[str | None] = mapped_column(String(500))
     portfolio_url: Mapped[str | None] = mapped_column(String(500))
     location_current: Mapped[str | None] = mapped_column(String(255))
+    resume_path: Mapped[str | None] = mapped_column(String(1000))
 
     # ── ## Availability And Compensation ───────────────────────────────────────
     notice_period: Mapped[str | None] = mapped_column(String(100))

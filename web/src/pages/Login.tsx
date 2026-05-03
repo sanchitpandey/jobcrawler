@@ -44,8 +44,16 @@ export function Login() {
 
         <form onSubmit={handleSubmit} className="border border-line2 rounded-xl bg-ink2/60 p-7 space-y-5">
           {error && (
-            <div className="border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3 font-mono text-xs text-red-soft">
-              {error}
+            <div className="border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3 font-mono text-xs text-red-soft space-y-1">
+              <div>{error}</div>
+              {error.toLowerCase().includes('incorrect') && (
+                <div className="text-mute">
+                  No account?{' '}
+                  <Link to="/register" className="text-amber hover:underline underline-offset-2">
+                    Create one free →
+                  </Link>
+                </div>
+              )}
             </div>
           )}
 

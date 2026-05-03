@@ -10,9 +10,11 @@ POST   /profile/import-markdown — paste raw APPLY_PROFILE.md text → upsert
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +25,10 @@ from api.models.user import User
 from api.routes.auth import get_current_user
 
 router = APIRouter(prefix="/profile", tags=["profile"])
+
+UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
+MAX_RESUME_BYTES = 5 * 1024 * 1024
+PDF_MAGIC = b"%PDF-"
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -100,6 +106,7 @@ class ProfileResponse(BaseModel):
     github_url: str | None
     portfolio_url: str | None
     location_current: str | None
+    resume_path: str | None
 
     # Availability
     notice_period: str | None
@@ -166,6 +173,7 @@ def _profile_to_response(profile: Profile) -> ProfileResponse:
         github_url=profile.github_url,
         portfolio_url=profile.portfolio_url,
         location_current=profile.location_current,
+        resume_path=profile.resume_path,
         notice_period=profile.notice_period,
         current_ctc=profile.current_ctc,
         expected_ctc=profile.expected_ctc,
@@ -250,6 +258,51 @@ def _profile_missing_fields(profile: Profile | None) -> list[str]:
         missing.append("skills_json")
 
     return missing
+
+
+def _resume_path_for_user(user_id: str, original_filename: str) -> Path:
+    source_name = Path(original_filename or "resume.pdf").stem
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", source_name).strip("._") or "resume"
+    filename = f"{user_id}_{safe_stem}.pdf"
+    return UPLOAD_DIR / filename
+
+
+def _delete_resume_file(path_str: str | None) -> None:
+    if not path_str:
+        return
+
+    try:
+        Path(path_str).unlink(missing_ok=True)
+    except OSError:
+        # Best-effort cleanup; profile deletion should still succeed.
+        pass
+
+
+async def _read_resume_upload(file: UploadFile) -> bytes:
+    filename = file.filename or ""
+    if file.content_type not in {None, "application/pdf"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF resumes are supported.",
+        )
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF resumes are supported.",
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_RESUME_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Resume file must be 5 MB or smaller.",
+        )
+    if not contents.startswith(PDF_MAGIC):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is not a valid PDF.",
+        )
+    return contents
 
 
 # ── Markdown import ────────────────────────────────────────────────────────────
@@ -438,6 +491,63 @@ async def update_profile(
     return _profile_to_response(profile)
 
 
+class ResumeUploadResponse(BaseModel):
+    path: str
+    filename: str
+
+
+@router.post("/resume", response_model=ResumeUploadResponse)
+async def upload_resume(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResumeUploadResponse:
+    try:
+        contents = await _read_resume_upload(file)
+    finally:
+        await file.close()
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    destination = _resume_path_for_user(current_user.id, file.filename or "resume.pdf")
+    old_resume_path = profile.resume_path if profile.resume_path != str(destination) else None
+
+    destination.write_bytes(contents)
+    profile.resume_path = str(destination)
+    await db.commit()
+    await db.refresh(profile)
+
+    _delete_resume_file(old_resume_path)
+    return ResumeUploadResponse(path=profile.resume_path, filename=destination.name)
+
+
+@router.get("/resume")
+async def download_resume(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
+    profile = result.scalar_one_or_none()
+    if profile is None or not profile.resume_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+
+    resume_path = Path(profile.resume_path)
+    if not resume_path.exists() or not resume_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+
+    return FileResponse(
+        path=resume_path,
+        media_type="application/pdf",
+        filename=resume_path.name,
+        headers={"Content-Disposition": f'attachment; filename="{resume_path.name}"'},
+    )
+
+
 _MAX_MARKDOWN_BYTES = 100_000  # 100 KB
 
 
@@ -465,3 +575,20 @@ async def import_markdown(
     await db.commit()
     await db.refresh(profile)
     return _profile_to_response(profile)
+
+
+@router.delete("")
+async def delete_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+
+    resume_path = profile.resume_path
+    await db.delete(profile)
+    await db.commit()
+    _delete_resume_file(resume_path)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

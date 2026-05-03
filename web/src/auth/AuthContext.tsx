@@ -9,6 +9,8 @@ interface AuthContextValue {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
+  verifyEmail: (code: string) => Promise<void>
+  resendVerification: () => Promise<void>
   logout: () => void
 }
 
@@ -88,7 +90,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     storeTokens(data)
     const me = await api.get<User>('/auth/me')
     setUser(me)
-    navigate('/onboarding')
+    navigate('/verify-email')
+  }
+
+  async function verifyEmail(code: string) {
+    const me = await api.post<User>('/auth/verify-email', { code })
+    setUser(me)
+  }
+
+  async function resendVerification() {
+    await api.post('/auth/resend-verification')
   }
 
   function logout() {
@@ -100,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, verifyEmail, resendVerification, logout }}>
       {children}
     </AuthContext.Provider>
   )

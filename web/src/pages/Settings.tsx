@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
@@ -133,9 +134,11 @@ function ChangePassword() {
 
 function ExportData() {
   const [loading, setLoading] = useState(false)
+  const [noProfile, setNoProfile] = useState(false)
 
   async function handleExport() {
     setLoading(true)
+    setNoProfile(false)
     try {
       const profile = await api.get<unknown>('/profile')
       const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' })
@@ -145,8 +148,13 @@ function ExportData() {
       a.download = `jobcrawler-profile-${new Date().toISOString().slice(0, 10)}.json`
       a.click()
       URL.revokeObjectURL(url)
-    } catch { /* ignore */ }
-    setLoading(false)
+    } catch (e) {
+      if (e instanceof Error && e.message.toLowerCase().includes('not found')) {
+        setNoProfile(true)
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -154,6 +162,20 @@ function ExportData() {
       <p className="text-sm text-cream2">
         Download your profile data as a JSON file. Includes all fields, skills, and preferences.
       </p>
+      {noProfile && (
+        <div className="border border-amber/30 bg-amber/10 rounded-lg px-4 py-3 text-sm text-amber flex items-center gap-3">
+          <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span>
+            No profile yet.{' '}
+            <Link to="/onboarding" className="underline underline-offset-2 hover:text-amber2">
+              Complete onboarding
+            </Link>{' '}
+            to set up your profile first.
+          </span>
+        </div>
+      )}
       <button
         onClick={handleExport}
         disabled={loading}

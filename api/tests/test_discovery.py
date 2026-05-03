@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -68,6 +69,8 @@ async def _create_application(user_id: str, **kwargs) -> Application:
         comp_est=kwargs.get("comp_est"),
         llm_tokens_used=kwargs.get("llm_tokens_used", 0),
         filled_fields_json=kwargs.get("filled_fields_json"),
+        applied_at=kwargs.get("applied_at"),
+        scored_at=kwargs.get("scored_at", datetime.now(timezone.utc)),
     )
     async with _db_session() as session:
         session.add(app_row)
@@ -453,3 +456,125 @@ async def test_approve_batch_approves_scored_jobs_above_threshold(
 
     below_threshold = await _get_app_by_external_id(user_id, "linkedin:approve-3")
     assert below_threshold.status == "scored"
+
+
+async def test_stats_returns_dashboard_payload(
+    test_client: AsyncClient, user_with_profile: dict
+):
+    headers = user_with_profile["headers"]
+    user_id = await _get_user_id(user_with_profile["user"]["email"])
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+
+    recent_applied = [
+        await _create_application(
+            user_id,
+            external_id=f"linkedin:recent-{idx}",
+            company=company,
+            title=f"Role {idx}",
+            status="applied",
+            fit_score=score,
+            applied_at=now - timedelta(hours=idx),
+            scored_at=week_start + timedelta(days=1),
+        )
+        for idx, (company, score) in enumerate(
+            [
+                ("Acme", 95),
+                ("Beta", 75),
+                ("Acme", 55),
+                ("Gamma", 35),
+                ("Acme", 82),
+            ],
+            start=1,
+        )
+    ]
+    oldest_recent = await _create_application(
+        user_id,
+        external_id="linkedin:recent-6",
+        company="Delta",
+        title="Role 6",
+        status="applied",
+        fit_score=65,
+        applied_at=now - timedelta(days=2),
+        scored_at=week_start + timedelta(days=2),
+    )
+    await _create_application(
+        user_id,
+        external_id="linkedin:approved-queue",
+        company="Queue Co",
+        title="Approved Queue",
+        status="approved",
+        fit_score=88,
+        scored_at=week_start + timedelta(days=1),
+    )
+    await _create_application(
+        user_id,
+        external_id="linkedin:needs-review",
+        company="Review Co",
+        title="Needs Review",
+        status="scored",
+        fit_score=45,
+        scored_at=week_start + timedelta(days=1),
+    )
+    await _create_application(
+        user_id,
+        external_id="linkedin:discovered-only",
+        company="Fresh Co",
+        title="Fresh Discovery",
+        status="discovered",
+        fit_score=None,
+        scored_at=week_start + timedelta(days=1),
+    )
+    await _create_application(
+        user_id,
+        external_id="linkedin:previous-week",
+        company="Old Co",
+        title="Old Week",
+        status="applied",
+        fit_score=90,
+        applied_at=week_start - timedelta(days=1),
+        scored_at=week_start - timedelta(days=1),
+    )
+    if month_start != week_start:
+        await _create_application(
+            user_id,
+            external_id="linkedin:month-only",
+            company="Month Co",
+            title="Month Only",
+            status="applied",
+            fit_score=61,
+            applied_at=month_start + timedelta(days=1),
+            scored_at=month_start + timedelta(days=1),
+        )
+
+    resp = await test_client.get("/discovery/stats", headers=headers)
+    assert resp.status_code == 200
+
+    body = resp.json()
+    assert body["applied_today"] >= 1
+    assert body["applied_this_week"] == 6
+    expected_month_count = 7 if month_start != week_start else 6
+    expected_discovered_count = 9 if month_start != week_start else 8
+    expected_scored_count = 8 if month_start != week_start else 7
+    expected_good_count = 3 if month_start != week_start else 2
+    assert body["applied_this_month"] == expected_month_count
+    assert body["queue_approved"] == 1
+    assert body["queue_needs_review"] == 1
+    assert body["total_discovered_this_week"] == expected_discovered_count
+    assert body["total_scored_this_week"] == expected_scored_count
+
+    recent_ids = [item["id"] for item in body["recent_applications"]]
+    assert len(recent_ids) == 5
+    assert oldest_recent.id not in recent_ids
+    assert recent_ids == [app.id for app in recent_applied]
+
+    assert body["score_distribution"] == {
+        "excellent": 4,
+        "good": expected_good_count,
+        "fair": 2,
+        "poor": 1,
+    }
+    assert body["top_companies"][0] == {"company": "Acme", "count": 3}

@@ -13,7 +13,7 @@ export function PublicRoute({ children }: { children: ReactNode }) {
     )
   }
 
-  if (user) return <Navigate to="/dashboard" replace />
+  if (user) return <Navigate to={user.is_verified ? '/dashboard' : '/verify-email'} replace />
 
   return <>{children}</>
 }

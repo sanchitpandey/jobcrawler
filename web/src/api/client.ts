@@ -45,24 +45,29 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   })
 
   if (res.status === 401) {
-    const refreshed = await tryRefresh()
-    if (refreshed) {
-      const retry = await fetch(url, {
-        ...options,
-        headers: { ...authHeaders(), ...(options.headers ?? {}) },
-      })
-      if (!retry.ok) {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
-        throw new Error('Session expired')
+    // Only attempt refresh + redirect when we actually had a session token.
+    // Without a token (e.g. a failed login attempt) this is a normal API error —
+    // fall through so the caller receives the error message from the response body.
+    if (getToken()) {
+      const refreshed = await tryRefresh()
+      if (refreshed) {
+        const retry = await fetch(url, {
+          ...options,
+          headers: { ...authHeaders(), ...(options.headers ?? {}) },
+        })
+        if (!retry.ok) {
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          window.location.href = '/login'
+          throw new Error('Session expired')
+        }
+        return retry.json() as Promise<T>
       }
-      return retry.json() as Promise<T>
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      window.location.href = '/login'
+      throw new Error('Session expired')
     }
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    window.location.href = '/login'
-    throw new Error('Unauthorized')
   }
 
   if (!res.ok) {

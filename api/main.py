@@ -1,8 +1,13 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
+import sentry_sdk
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -21,6 +26,22 @@ settings = get_settings()
 # Configure logging before the first log line.
 setup_logging(app_env=settings.app_env, debug=settings.debug)
 log = get_logger(__name__)
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.app_env,
+        traces_sample_rate=settings.sentry_traces_sample_rate if settings.app_env == "production" else 0.0,
+        integrations=[
+            FastApiIntegration(),
+            SqlalchemyIntegration(),
+            LoggingIntegration(
+                level=logging.WARNING,   # breadcrumbs from WARNING+
+                event_level=logging.ERROR,  # send to Sentry from ERROR+
+            ),
+        ],
+        send_default_pii=False,
+    )
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

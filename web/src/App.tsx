@@ -15,6 +15,7 @@ import { ReviewQueue } from './pages/ReviewQueue'
 import { Billing } from './pages/Billing'
 import { Settings } from './pages/Settings'
 import { NotFound } from './pages/NotFound'
+import { VerifyEmail } from './pages/VerifyEmail'
 
 function AppRoutes() {
   return (
@@ -25,6 +26,7 @@ function AppRoutes() {
       <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
 
       {/* Standalone protected (no sidebar layout) */}
+      <Route path="/verify-email" element={<ProtectedRoute><VerifyEmail /></ProtectedRoute>} />
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
 
       {/* Protected — wrapped in sidebar Layout */}

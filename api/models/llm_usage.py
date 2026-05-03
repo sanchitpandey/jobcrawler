@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import Index, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.models.base import Base
@@ -11,6 +11,9 @@ class LlmUsageLog(Base):
     """One row per LLM API call, used for per-user token billing."""
 
     __tablename__ = "llm_usage_logs"
+    __table_args__ = (
+        Index("ix_llm_usage_logs_user_id_created_at", "user_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())

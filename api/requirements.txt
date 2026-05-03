@@ -14,3 +14,4 @@ openai==1.77.0
 python-dotenv==1.1.0
 httpx==0.28.1
 razorpay==1.4.2
+sentry-sdk[fastapi]==2.58.0

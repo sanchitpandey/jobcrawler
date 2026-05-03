@@ -1,0 +1,118 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target"
+        required: true
+        default: api
+        type: choice
+        options: [api, web, all]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false   # never cancel an in-flight deploy
+
+jobs:
+  # ─── Gate: CI must pass ────────────────────────────────────────────────────
+  wait-for-ci:
+    name: Wait for CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CI workflow status
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: "API (Python 3.12)"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+      - name: Check web CI
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: "Web (Vite + TS)"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+
+  # ─── Deploy API ────────────────────────────────────────────────────────────
+  deploy-api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    needs: wait-for-ci
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'api' || inputs.target == 'all'))
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Render / Railway / Fly
+        # Replace this step with the deploy action for your hosting provider.
+        # Examples below — uncomment whichever you use:
+
+        # --- Render (set RENDER_API_KEY + RENDER_SERVICE_ID in repo secrets) ---
+        # uses: johnbeynon/render-deploy-action@v0.0.8
+        # with:
+        #   service-id: ${{ secrets.RENDER_SERVICE_ID }}
+        #   api-key: ${{ secrets.RENDER_API_KEY }}
+
+        # --- Railway ---
+        # uses: berviantoleo/railway-deploy@main
+        # env:
+        #   RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        #   SERVICE: api
+
+        # --- Fly.io ---
+        # uses: superfly/flyctl-actions/setup-flyctl@master
+        # run: flyctl deploy --remote-only --config api/fly.toml
+
+        run: echo "Add your API deploy step here (Render/Railway/Fly.io/VPS)"
+
+      - name: Run DB migrations
+        # After deploy, apply pending Alembic migrations.
+        # Adjust the command to your hosting provider's way of running one-off tasks.
+        run: echo "alembic -c api/alembic.ini upgrade head  (run this on remote)"
+
+  # ─── Deploy Web ────────────────────────────────────────────────────────────
+  deploy-web:
+    name: Deploy Web
+    runs-on: ubuntu-latest
+    needs: wait-for-ci
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'web' || inputs.target == 'all'))
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install and build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+
+      # --- Vercel (recommended for Vite) ---
+      # - uses: amondnet/vercel-action@v25
+      #   with:
+      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
+      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+      #     working-directory: web
+      #     vercel-args: --prod
+
+      - name: Deploy web (placeholder)
+        run: echo "Add your web deploy step here (Vercel/Netlify/Cloudflare Pages)"

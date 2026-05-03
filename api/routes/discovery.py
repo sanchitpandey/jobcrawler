@@ -565,9 +565,36 @@ async def approve_batch(
 
 class StatsResponse(BaseModel):
     applied_today: int
-    applied_week: int
+    applied_this_week: int
+    applied_this_month: int
     queue_approved: int
-    scored_needs_review: int
+    queue_needs_review: int
+    total_discovered_this_week: int
+    total_scored_this_week: int
+    recent_applications: list["RecentApplicationItem"]
+    score_distribution: "ScoreDistribution"
+    top_companies: list["TopCompanyItem"]
+
+
+class RecentApplicationItem(BaseModel):
+    id: str
+    company: str | None
+    title: str | None
+    fit_score: float | None
+    status: str
+    applied_at: datetime | None
+
+
+class ScoreDistribution(BaseModel):
+    excellent: int
+    good: int
+    fair: int
+    poor: int
+
+
+class TopCompanyItem(BaseModel):
+    company: str
+    count: int
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -577,7 +604,8 @@ async def get_stats(
 ) -> StatsResponse:
     now = datetime.now(tz=timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=7)
+    week_start = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
 
     # Count by status in one query
     status_result = await db.execute(
@@ -603,11 +631,107 @@ async def get_stats(
             Application.applied_at >= week_start,
         )
     )
-    applied_week: int = week_result.scalar_one() or 0
+    applied_this_week: int = week_result.scalar_one() or 0
+
+    month_result = await db.execute(
+        select(func.count(Application.id)).where(
+            Application.user_id == current_user.id,
+            Application.status == "applied",
+            Application.applied_at >= month_start,
+        )
+    )
+    applied_this_month: int = month_result.scalar_one() or 0
+
+    discovered_result = await db.execute(
+        select(func.count(Application.id)).where(
+            Application.user_id == current_user.id,
+            Application.scored_at >= week_start,
+        )
+    )
+    total_discovered_this_week: int = discovered_result.scalar_one() or 0
+
+    scored_result = await db.execute(
+        select(func.count(Application.id)).where(
+            Application.user_id == current_user.id,
+            Application.scored_at >= week_start,
+            Application.fit_score.is_not(None),
+        )
+    )
+    total_scored_this_week: int = scored_result.scalar_one() or 0
+
+    recent_result = await db.execute(
+        select(Application)
+        .where(
+            Application.user_id == current_user.id,
+            Application.status == "applied",
+            Application.applied_at.is_not(None),
+        )
+        .order_by(Application.applied_at.desc())
+        .limit(5)
+    )
+    recent_applications = [
+        RecentApplicationItem(
+            id=app.id,
+            company=app.company,
+            title=app.title,
+            fit_score=app.fit_score,
+            status=app.status,
+            applied_at=app.applied_at,
+        )
+        for app in recent_result.scalars().all()
+    ]
+
+    score_buckets_result = await db.execute(
+        select(Application.fit_score)
+        .where(
+            Application.user_id == current_user.id,
+            Application.fit_score.is_not(None),
+        )
+    )
+    score_distribution = {
+        "excellent": 0,
+        "good": 0,
+        "fair": 0,
+        "poor": 0,
+    }
+    for (fit_score,) in score_buckets_result.all():
+        score = float(fit_score)
+        if score >= 80:
+            score_distribution["excellent"] += 1
+        elif score >= 60:
+            score_distribution["good"] += 1
+        elif score >= 40:
+            score_distribution["fair"] += 1
+        else:
+            score_distribution["poor"] += 1
+
+    top_companies_result = await db.execute(
+        select(Application.company, func.count(Application.id).label("count"))
+        .where(
+            Application.user_id == current_user.id,
+            Application.status == "applied",
+            Application.company.is_not(None),
+            Application.company != "",
+        )
+        .group_by(Application.company)
+        .order_by(func.count(Application.id).desc(), Application.company.asc())
+        .limit(5)
+    )
+    top_companies = [
+        TopCompanyItem(company=company, count=count)
+        for company, count in top_companies_result.all()
+        if company is not None
+    ]
 
     return StatsResponse(
         applied_today=applied_today,
-        applied_week=applied_week,
+        applied_this_week=applied_this_week,
+        applied_this_month=applied_this_month,
         queue_approved=status_counts.get("approved", 0),
-        scored_needs_review=status_counts.get("scored", 0),
+        queue_needs_review=status_counts.get("scored", 0),
+        total_discovered_this_week=total_discovered_this_week,
+        total_scored_this_week=total_scored_this_week,
+        recent_applications=recent_applications,
+        score_distribution=ScoreDistribution(**score_distribution),
+        top_companies=top_companies,
     )

@@ -1,6 +1,9 @@
 from functools import lru_cache
+from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE = Path(__file__).parent / ".env"
 
 _INSECURE_JWT_DEFAULT = "change-me-in-production-use-32-plus-random-chars"
 
@@ -31,6 +34,8 @@ class Settings(BaseSettings):
         "http://localhost:5174",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        "https://jobcrawler.dev",
+        "https://www.jobcrawler.dev",
     ]
 
     # Subscription limits
@@ -42,12 +47,20 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
 
+    # Email (Resend)
+    resend_api_key: str = ""
+    email_from: str = "JobCrawler <noreply@jobcrawler.dev>"
+
+    # Sentry
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.2   # 20% of requests traced in prod
+
     # App
     app_env: str = "development"
     debug: bool = False
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
