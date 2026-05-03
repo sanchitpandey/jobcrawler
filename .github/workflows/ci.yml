@@ -35,7 +35,7 @@ jobs:
           cache-dependency-path: api/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r api/requirements.txt pytest pytest-asyncio anyio httpx aiosqlite
+        run: pip install setuptools -r api/requirements.txt pytest pytest-asyncio anyio httpx aiosqlite
 
       - name: Run tests
         run: pytest api/tests/ -v --tb=short
