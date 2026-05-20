@@ -382,7 +382,8 @@ class DiscoveryOrchestrator {
         sender: chrome.runtime.MessageSender,
       ): void => {
         // Only accept the response from our own offscreen document (no tab, own id).
-        if (sender.id && sender.id !== chrome.runtime.id) return;
+        // Audit N14: strict equality — `undefined` is not acceptable here.
+        if (sender.id !== chrome.runtime.id) return;
         if (sender.tab !== undefined) return;
         if (msg.type !== "OFFSCREEN_FETCH_RESULT" || msg.requestId !== requestId) return;
         clearTimeout(timeout);

@@ -72,6 +72,29 @@ const CONTENT_ONLY_MESSAGES = new Set([
   "discovery_page_complete",
 ]);
 
+// LLM / quota-spending / tracking messages that the popup AND a content script
+// on an allowlisted ATS origin both legitimately send (audit fix N3). Any
+// other origin — including the webapp or an unscoped third-party page — must
+// be rejected. Default-deny applies to everything not listed in one of the
+// three sets, so a future un-categorised message will fail closed.
+const CONTENT_AND_POPUP_MESSAGES = new Set([
+  "SCORE_JOB",
+  "ANSWER_FIELDS",
+  "GENERATE_COVER",
+  "TRACK_JOB",
+  "UPDATE_STATUS",
+]);
+
+// Internal acknowledgement messages the SW broadcasts to itself / the popup.
+// These have no side effects in handleMessage — they are echoed back as
+// {ok: true} — but they must still be accepted from the popup (and from the
+// SW itself when re-broadcasting), so list them explicitly rather than
+// letting them fall into the default-deny bucket.
+const POPUP_ONLY_ACK_MESSAGES = new Set([
+  "discovery_progress",
+  "auto_apply_progress",
+]);
+
 function isAllowedContentOrigin(url: string | undefined): boolean {
   if (!url) return false;
   try {
@@ -86,21 +109,36 @@ function validateSender(message: Message, sender: chrome.runtime.MessageSender):
   // 1. Cross-extension messages are always rejected. chrome.runtime.onMessage
   //    only fires for same-extension messages when externally_connectable is
   //    unset (it is), but we defend in depth.
-  if (sender.id && sender.id !== chrome.runtime.id) {
+  // Audit N14: strict equality — `undefined` is not acceptable here. Current
+  // Chromium always populates sender.id for same-extension messages.
+  if (sender.id !== chrome.runtime.id) {
     return "untrusted extension";
   }
-  // 2. Popup / options / service-worker self has no sender.tab.
   const fromTab = sender.tab !== undefined;
-  if (POPUP_ONLY_MESSAGES.has(message.type) && fromTab) {
-    return "tab cannot send popup-only message";
+  const type = message.type;
+
+  // 2. Popup-only messages.
+  if (POPUP_ONLY_MESSAGES.has(type) || POPUP_ONLY_ACK_MESSAGES.has(type)) {
+    if (fromTab) return "tab cannot send popup-only message";
+    return null;
   }
-  // 3. Content-originated messages must come from an allowlisted origin.
-  if (CONTENT_ONLY_MESSAGES.has(message.type)) {
+  // 3. Content-only messages — must come from an allowlisted ATS tab.
+  if (CONTENT_ONLY_MESSAGES.has(type)) {
     if (!fromTab || !isAllowedContentOrigin(sender.tab?.url ?? sender.url)) {
       return "content message from non-allowlisted origin";
     }
+    return null;
   }
-  return null;
+  // 4. Mixed-origin (popup or allowlisted content tab) — quota spenders.
+  if (CONTENT_AND_POPUP_MESSAGES.has(type)) {
+    if (fromTab && !isAllowedContentOrigin(sender.tab?.url ?? sender.url)) {
+      return "mixed-origin message from non-allowlisted tab";
+    }
+    return null;
+  }
+  // 5. Default-deny: any message type not categorised above is refused. This
+  //    protects against forgotten privileged messages being silently routed.
+  return "unknown message type";
 }
 
 chrome.runtime.onMessage.addListener(
@@ -192,11 +230,19 @@ async function handleMessage(message: Message, sender?: chrome.runtime.MessageSe
       return { ok: true };
 
     case "batch_job_complete":
-      autoApplyOrchestrator.handleBatchJobComplete(message, sender?.tab?.id ?? -1);
+      autoApplyOrchestrator.handleBatchJobComplete(
+        message,
+        sender?.tab?.id ?? -1,
+        sender?.tab?.url ?? "",
+      );
       return { ok: true };
 
     case "batch_job_failed":
-      autoApplyOrchestrator.handleBatchJobFailed(message.error, sender?.tab?.id ?? -1);
+      autoApplyOrchestrator.handleBatchJobFailed(
+        message.error,
+        sender?.tab?.id ?? -1,
+        sender?.tab?.url ?? "",
+      );
       return { ok: true };
 
     // auto_apply_progress is broadcast outward to popup; acknowledge if received.

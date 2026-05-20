@@ -101,6 +101,10 @@ export interface QueueItem {
   title: string;
   fit_score: number;
   ats_type: string;
+  // Public LinkedIn job ID (the numeric segment of /jobs/view/{id}). Used by
+  // the auto-apply orchestrator to verify that batch_job_complete messages
+  // come from the tab we actually opened (audit fix N8).
+  linkedin_job_id?: string | null;
 }
 
 export interface AutoApplyStatus {

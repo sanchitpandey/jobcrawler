@@ -65,6 +65,29 @@ async function doRefresh(refreshToken: string): Promise<AuthToken> {
   return { access_token: data.access_token, refresh_token: data.refresh_token };
 }
 
+/**
+ * Audit N13: refresh tokens rotate on every call, so two concurrent
+ * fetchWithAuth() invocations (e.g. popup opening while the SW also fires)
+ * would each POST /auth/refresh; the second one's refresh token is already
+ * revoked → the user appears logged out mid-session. Coalesce all callers
+ * onto a single in-flight refresh promise.
+ */
+let _refreshInFlight: Promise<AuthToken> | null = null;
+
+async function refreshOnce(refreshToken: string): Promise<AuthToken> {
+  if (_refreshInFlight) return _refreshInFlight;
+  _refreshInFlight = (async () => {
+    try {
+      const fresh = await doRefresh(refreshToken);
+      await setAuthToken(fresh);
+      return fresh;
+    } finally {
+      _refreshInFlight = null;
+    }
+  })();
+  return _refreshInFlight;
+}
+
 // ── Authenticated fetch ───────────────────────────────────────────────────────
 
 async function fetchWithAuth(
@@ -76,8 +99,7 @@ async function fetchWithAuth(
 
   if (token && isExpired(token.access_token)) {
     try {
-      token = await doRefresh(token.refresh_token);
-      await setAuthToken(token);
+      token = await refreshOnce(token.refresh_token);
     } catch {
       // Refresh failed — continue without a valid token; server will return 401.
     }

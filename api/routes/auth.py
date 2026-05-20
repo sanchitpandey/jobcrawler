@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, status
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer
 import jwt
@@ -45,6 +45,8 @@ _MAX_CODE_ATTEMPTS = 5
 _MAX_FAILED_LOGINS = 10
 _LOCKOUT_MINUTES = 15
 REFRESH_COOKIE_NAME = "jc_refresh"
+CSRF_COOKIE_NAME = "jc_csrf"  # readable by JS; double-submit token (audit N5)
+CSRF_HEADER_NAME = "X-CSRF-Token"
 
 # Constant-time decoy used when an email is unknown — prevents login timing oracle.
 _DUMMY_HASH = bcrypt.hashpw(b"jobcrawler-decoy-password", bcrypt.gensalt(rounds=12)).decode()
@@ -192,6 +194,13 @@ def _set_refresh_cookie(response: Response, raw_refresh: str) -> None:
     Browsers (web app) get the refresh token as an httpOnly cookie so XSS in
     a React render path cannot read it. Native callers (extension, mobile)
     ignore the cookie and use the JSON body — both pathways stay supported.
+
+    Audit N5 (CSRF defense in depth): alongside the httpOnly refresh cookie
+    we set a non-httpOnly ``jc_csrf`` cookie carrying a random token. The web
+    client reads that cookie and echoes it as ``X-CSRF-Token`` on
+    ``/auth/refresh`` and ``/auth/logout``. The cookie-bearing refresh path
+    enforces a match; the body-bearing path (extension) bypasses CSRF since
+    the attacker would need to know the refresh token itself.
     """
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -202,10 +211,43 @@ def _set_refresh_cookie(response: Response, raw_refresh: str) -> None:
         samesite="strict",
         path="/auth",  # only sent to /auth/* endpoints
     )
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=secrets.token_urlsafe(32),
+        max_age=settings.jwt_refresh_token_expire_days * 24 * 3600,
+        httponly=False,  # JS must be able to read it to echo in the header
+        secure=settings.app_env == "production",
+        samesite="strict",
+        path="/auth",
+    )
 
 
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE_NAME, path="/auth")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/auth")
+
+
+def _enforce_csrf(
+    used_cookie: bool, csrf_cookie: str | None, csrf_header: str | None
+) -> None:
+    """
+    Audit N5: double-submit CSRF check on cookie-driven /auth/refresh and
+    /auth/logout calls. ``used_cookie`` is True when the refresh token came
+    from the ``jc_refresh`` cookie (vs. the JSON body). Body-driven calls
+    skip CSRF — the attacker would need the refresh token itself, which the
+    extension keeps in chrome.storage.session.
+    """
+    if not used_cookie:
+        return
+    if (
+        not csrf_cookie
+        or not csrf_header
+        or not secrets.compare_digest(csrf_cookie, csrf_header)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSRF token missing or invalid.",
+        )
 
 
 async def _issue_token_pair(
@@ -234,7 +276,8 @@ async def register(
     exists — registration completion is signalled through the verification email,
     not the HTTP response (fix #9: user-enumeration).
     """
-    auth_throttle.enforce(request, "register")
+    # Per-IP cap (5/hr) + per-email cap (3/hr) — fix N7 prevents mail-bombing.
+    await auth_throttle.enforce(request, "register", key=req.email)
     # Defense in depth: 12-char floor + breach-list check (fix #13).
     assert_password_acceptable(req.password)
 
@@ -252,6 +295,13 @@ async def register(
             user.verification_attempts = 0
             await db.flush()
             send_verification_email(user.email, code)
+        else:
+            # Audit N10: the verified-already branch otherwise skips both the
+            # bcrypt password hash AND the SMTP send that the new-account branch
+            # below performs. Burn an equivalent bcrypt cost on the input so a
+            # timing-side-channel attacker cannot tell verified-existing apart
+            # from new-registration. The result is discarded.
+            _hash_password(req.password)
         return GenericResponse(status="pending_verification")
 
     code = _generate_verification_code()
@@ -278,7 +328,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     # Per-IP + per-email throttle
-    auth_throttle.enforce(request, "login", key=req.email)
+    await auth_throttle.enforce(request, "login", key=req.email)
 
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
@@ -334,15 +384,20 @@ async def refresh(
     db: AsyncSession = Depends(get_db),
     body: RefreshRequestOptional | None = None,
     jc_refresh: str | None = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
+    jc_csrf: str | None = Cookie(default=None, alias=CSRF_COOKIE_NAME),
+    csrf_header: str | None = Header(default=None, alias=CSRF_HEADER_NAME),
 ) -> TokenResponse:
-    auth_throttle.enforce(request, "login")  # share login IP bucket
+    await auth_throttle.enforce(request, "login")  # share login IP bucket
 
     invalid_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
     )
-    raw = (body.refresh_token if body else None) or jc_refresh
+    body_token = body.refresh_token if body else None
+    raw = body_token or jc_refresh
     if not raw:
         raise invalid_exc
+    # Audit N5: cookie-driven refreshes must echo the CSRF token in the header.
+    _enforce_csrf(used_cookie=body_token is None, csrf_cookie=jc_csrf, csrf_header=csrf_header)
 
     rotated = await refresh_tokens.rotate(db, raw)
     if rotated is None:
@@ -370,9 +425,15 @@ async def logout(
     db: AsyncSession = Depends(get_db),
     body: RefreshRequestOptional | None = None,
     jc_refresh: str | None = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
+    jc_csrf: str | None = Cookie(default=None, alias=CSRF_COOKIE_NAME),
+    csrf_header: str | None = Header(default=None, alias=CSRF_HEADER_NAME),
 ) -> Response:
     """Revoke the caller's refresh token. Idempotent. Clears the cookie."""
-    raw = (body.refresh_token if body else None) or jc_refresh
+    body_token = body.refresh_token if body else None
+    raw = body_token or jc_refresh
+    # Audit N5: cookie-driven logout must echo the CSRF token in the header.
+    _enforce_csrf(used_cookie=body_token is None and jc_refresh is not None,
+                  csrf_cookie=jc_csrf, csrf_header=csrf_header)
     if raw:
         await refresh_tokens.revoke(db, raw)
     _clear_refresh_cookie(response)
@@ -386,7 +447,7 @@ async def verify_email(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    auth_throttle.enforce(request, "verify", key=current_user.id)
+    await auth_throttle.enforce(request, "verify", key=current_user.id)
 
     if current_user.is_verified:
         return current_user
@@ -432,7 +493,7 @@ async def resend_verification(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    auth_throttle.enforce(request, "verify", key=current_user.id)
+    await auth_throttle.enforce(request, "verify", key=current_user.id)
 
     if current_user.is_verified:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already verified.")
@@ -463,7 +524,7 @@ async def forgot_password(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    auth_throttle.enforce(request, "forgot", key=req.email)
+    await auth_throttle.enforce(request, "forgot", key=req.email)
 
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
@@ -503,7 +564,7 @@ async def reset_password_with_email(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    auth_throttle.enforce(request, "reset", key=req.email)
+    await auth_throttle.enforce(request, "reset", key=req.email)
     assert_password_acceptable(req.new_password)
 
     result = await db.execute(select(User).where(User.email == req.email))

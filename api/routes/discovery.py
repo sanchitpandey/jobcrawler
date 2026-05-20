@@ -9,6 +9,13 @@ PATCH /discovery/{app_id}/status — update application status
 POST /discovery/approve-batch    — bulk-approve scored jobs above a score floor
 GET  /discovery/preferences      — get user's SearchPreference
 POST /discovery/preferences      — create or update SearchPreference
+
+Verified-email gate policy (audit fix N1):
+    Quota-spending / pipeline-advancing writes — /ingest, /enrich, /enrich-batch,
+    /score-batch, /approve-batch — require ``require_verified_user``. Read-only
+    /queue, /stats, /preferences and the PATCH /{id}/status status change are
+    gated on the lighter ``get_current_user`` so an unverified account can still
+    inspect its own state and cancel pending work.
 """
 
 from __future__ import annotations
@@ -27,7 +34,7 @@ from api.models.application import Application
 from api.models.base import get_db
 from api.models.profile import Profile
 from api.models.search_preference import SearchPreference
-from api.routes.auth import get_current_user
+from api.routes.auth import get_current_user, require_verified_user
 from api.models.user import User
 from api.services import scorer as scorer_svc
 from api.services.filter import filter_job
@@ -111,7 +118,7 @@ async def _get_search_preference(user_id: str, db: AsyncSession) -> SearchPrefer
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_jobs(
     body: IngestRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> IngestResponse:
     """
@@ -249,7 +256,7 @@ class EnrichRequest(BaseModel):
 @router.post("/enrich")
 async def enrich_job(
     body: EnrichRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
     ext_id = f"linkedin:{body.linkedin_job_id}"
@@ -289,7 +296,7 @@ class EnrichBatchResponse(BaseModel):
 @router.post("/enrich-batch", response_model=EnrichBatchResponse)
 async def enrich_batch(
     body: EnrichBatchRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> EnrichBatchResponse:
     """Batch-enrich multiple jobs in one transaction."""
@@ -334,7 +341,7 @@ class ScoreBatchResponse(BaseModel):
 
 @router.post("/score-batch", response_model=ScoreBatchResponse)
 async def score_batch(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScoreBatchResponse:
     """LLM-score all discovery Applications for the current user, sequentially."""
@@ -538,7 +545,7 @@ class ApproveBatchResponse(BaseModel):
 @router.post("/approve-batch", response_model=ApproveBatchResponse)
 async def approve_batch(
     body: ApproveBatchRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApproveBatchResponse:
     result = await db.execute(

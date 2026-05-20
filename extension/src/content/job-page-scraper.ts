@@ -163,7 +163,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Defence-in-depth: only accept this command from our own SW/popup.
     // A web page running in the same tab cannot forge sender.id.
-    if (sender.id && sender.id !== chrome.runtime.id) return
+    // Audit N14: strict equality — undefined must not pass.
+    if (sender.id !== chrome.runtime.id) return
     if (sender.tab !== undefined) return
     if (msg.type !== 'extract_job_details') return
 

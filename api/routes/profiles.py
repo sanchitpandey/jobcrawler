@@ -5,6 +5,13 @@ GET    /profile                 — return the current user's profile
 POST   /profile                 — create profile (409 if already exists)
 PATCH  /profile                 — partial update (upsert-safe)
 POST   /profile/import-markdown — paste raw APPLY_PROFILE.md text → upsert
+
+Verified-email gate policy (audit fix N9):
+    Profile reads / writes stay on ``get_current_user`` — onboarding requires
+    a profile to exist before the user is asked to verify email, so gating it
+    on ``require_verified_user`` would break the signup flow. None of these
+    endpoints spend LLM quota or advance the application pipeline; the
+    quota-spending gate lives in jobs.py / forms.py / discovery.py.
 """
 
 from __future__ import annotations

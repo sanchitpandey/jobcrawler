@@ -5,17 +5,20 @@
  * messages (we never set externally_connectable), defence-in-depth means asserting
  * sender.id matches our extension and constraining where the message may originate.
  *
- * - `isFromOwnExtension`  — sender.id is our id, OR (legacy event with no id at all).
+ * - `isFromOwnExtension`  — sender.id must equal our id. (Audit N14: prior
+ *   logic short-circuited on `undefined`, which Chromium does not produce for
+ *   same-extension messages but would let a future MV3 quirk slip through.)
  * - `isFromExtensionInternal` — also requires sender.tab to be undefined (popup / SW
  *   / offscreen). Use this for messages that a malicious tab must NEVER be able
  *   to spoof to the content script (e.g. SHOW_SCORE, extract_job_details).
  */
 
 export function isFromOwnExtension(sender: chrome.runtime.MessageSender): boolean {
-  // sender.id is undefined when message comes from a content script in the same
-  // extension on some Chromium builds; otherwise it carries the extension id.
-  if (sender.id && sender.id !== chrome.runtime.id) return false;
-  return true;
+  // Strict equality: refuse missing or mismatched ids. Current Chromium
+  // populates sender.id for every same-extension message — anything else is
+  // either a foreign extension (would already be blocked by Chrome before this
+  // point) or a malformed/forged event.
+  return sender.id === chrome.runtime.id;
 }
 
 export function isFromExtensionInternal(sender: chrome.runtime.MessageSender): boolean {

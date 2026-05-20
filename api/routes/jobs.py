@@ -6,6 +6,14 @@ GET    /jobs                     — list applications (filterable)
 GET    /jobs/{app_id}            — single application detail
 PATCH  /jobs/{app_id}/status     — advance status, optionally attach filled fields / cover letter
 POST   /jobs/score-job           — score a job against the user's profile (no DB write)
+
+Verified-email gate policy (audit fixes #16 + N9):
+    Quota-spending / state-creating writes — /jobs/score-job (LLM) and
+    POST /jobs (creates an Application row counted against the weekly cap) —
+    require ``require_verified_user``. Read-only listings, single-job lookup,
+    and status PATCH stay on ``get_current_user`` so an unverified account can
+    still inspect its own tracker and cancel pending work. The same split is
+    documented in api/routes/discovery.py and api/routes/profiles.py.
 """
 
 from __future__ import annotations

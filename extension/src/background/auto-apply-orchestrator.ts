@@ -31,6 +31,11 @@ export class AutoApplyOrchestrator {
   private stopRequested = false;
   private pendingResolve: ((r: BatchJobResult) => void) | null = null;
   private pendingTabId: number | null = null;
+  // Audit N8: validate that batch_job_complete/failed messages name the job
+  // we actually opened — a script on a LinkedIn page (with the right origin)
+  // would otherwise be able to fake completion of an arbitrary job and
+  // corrupt dashboard state / trip the consecutive-failure stop.
+  private pendingLinkedinJobId: string | null = null;
 
   async start(maxJobs = DEFAULT_MAX_JOBS): Promise<void> {
     if (this.running) return;
@@ -60,15 +65,41 @@ export class AutoApplyOrchestrator {
       chrome.tabs.remove(this.pendingTabId).catch(() => undefined);
       this.pendingTabId = null;
     }
+    this.pendingLinkedinJobId = null;
+  }
+
+  /**
+   * Validate that a batch_job_complete/failed message is for the job we're
+   * currently working on. Audit N8: a script running on a LinkedIn page can
+   * pass the SW's origin allowlist; we additionally require the message to
+   * come from the active background tab AND to reference the active queue
+   * item's linkedin_job_id (extracted from the tab URL). The only exception
+   * is the `session_expired` failure, where LinkedIn has redirected the tab
+   * to /login / /feed and the job ID is no longer in the URL — we still
+   * scope that case to ``pendingTabId`` so a forged message from another
+   * LinkedIn tab can't fake a session-expired stop.
+   */
+  private isMessageForActiveJob(tabId: number, tabUrl: string, error?: string): boolean {
+    if (this.pendingResolve === null) return false;
+    if (tabId !== this.pendingTabId) return false;
+    if (error === "session_expired") return true;
+    const expected = this.pendingLinkedinJobId;
+    if (!expected) return false;
+    // LinkedIn URLs carry the job id as a numeric path segment or query param:
+    //   /jobs/view/1234567/  or  ?currentJobId=1234567  or
+    //   /jobs/collections/?currentJobId=1234567 etc.
+    return tabUrl.includes(expected);
   }
 
   /** Called by service-worker when it receives 'batch_job_complete' from a tab. */
   handleBatchJobComplete(
     msg: { success: boolean; skipped?: boolean; filledFields?: Record<string, string> },
     tabId: number,
+    tabUrl: string,
   ): void {
-    if (tabId !== this.pendingTabId || !this.pendingResolve) return;
+    if (!this.isMessageForActiveJob(tabId, tabUrl)) return;
     const resolve = this.pendingResolve;
+    if (!resolve) return;
     this.pendingResolve = null;
     resolve({
       success: msg.success,
@@ -79,9 +110,10 @@ export class AutoApplyOrchestrator {
   }
 
   /** Called by service-worker when it receives 'batch_job_failed' from a tab. */
-  handleBatchJobFailed(error: string, tabId: number): void {
-    if (tabId !== this.pendingTabId || !this.pendingResolve) return;
+  handleBatchJobFailed(error: string, tabId: number, tabUrl: string): void {
+    if (!this.isMessageForActiveJob(tabId, tabUrl, error)) return;
     const resolve = this.pendingResolve;
+    if (!resolve) return;
     this.pendingResolve = null;
     resolve({
       success: false,
@@ -139,6 +171,9 @@ export class AutoApplyOrchestrator {
       }
 
       this.pendingTabId = tab.id;
+      // Audit N8: capture the expected job id so handleBatchJobComplete /
+      // handleBatchJobFailed can reject forged messages from other LinkedIn tabs.
+      this.pendingLinkedinJobId = job.linkedin_job_id ?? null;
       await this._waitForTabLoad(tab.id);
 
       // Detect if the user manually closes the background tab before the apply
@@ -159,6 +194,7 @@ export class AutoApplyOrchestrator {
 
       await chrome.tabs.remove(tab.id).catch(() => undefined);
       this.pendingTabId = null;
+      this.pendingLinkedinJobId = null;
       await chrome.storage.local.set({ batchMode: false, currentJobId: null });
 
       if (result.captcha) {

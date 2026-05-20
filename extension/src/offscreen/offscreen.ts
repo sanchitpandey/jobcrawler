@@ -6,11 +6,19 @@ chrome.runtime.onMessage.addListener(
   (msg: { type: string; url?: string; requestId?: string }, sender, sendResponse) => {
     // Only accept fetch requests from our own SW. Cross-extension or tab origin
     // is rejected — this listener is otherwise a SSRF-style proxy.
-    if (sender.id && sender.id !== chrome.runtime.id) return;
+    // Audit N14: strict equality — refuse messages with no sender.id at all.
+    if (sender.id !== chrome.runtime.id) return;
     if (sender.tab !== undefined) return;
     if (msg.type !== "OFFSCREEN_FETCH" || !msg.url || !msg.requestId) return;
 
     const { url, requestId } = msg;
+
+    // Audit N15: hardcoded allowlist — only LinkedIn guest jobs API may be proxied.
+    // Prevents any same-extension caller from using this as an open URL proxy.
+    if (!url.startsWith("https://www.linkedin.com/jobs-guest/")) {
+      sendResponse({ requestId, html: "", status: 0 });
+      return true;
+    }
 
     fetch(url, {
       headers: {

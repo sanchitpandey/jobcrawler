@@ -27,11 +27,24 @@ function authHeaders(): HeadersInit {
   }
 }
 
+// Audit N5: double-submit CSRF token — read the non-httpOnly jc_csrf cookie
+// the server sets alongside the httpOnly refresh cookie, and echo it as a
+// custom header on cookie-driven auth calls (/auth/refresh, /auth/logout).
+function readCsrfCookie(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)jc_csrf=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+function csrfHeader(): Record<string, string> {
+  const token = readCsrfCookie()
+  return token ? { 'X-CSRF-Token': token } : {}
+}
+
 async function tryRefresh(): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...csrfHeader() },
       credentials: 'include',  // send the httpOnly refresh cookie
       body: JSON.stringify({}),
     })
@@ -46,12 +59,16 @@ async function tryRefresh(): Promise<boolean> {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${path}`
+  // /auth/logout (and the manual /auth/refresh path above) need the CSRF
+  // double-submit header — see readCsrfCookie above.
+  const extraHeaders =
+    path === '/auth/logout' || path === '/auth/refresh' ? csrfHeader() : {}
   // `credentials: 'include'` is needed so the browser sends the refresh cookie
   // on /auth/* paths. For other paths it's harmless.
   const res = await fetch(url, {
     ...options,
     credentials: 'include',
-    headers: { ...authHeaders(), ...(options.headers ?? {}) },
+    headers: { ...authHeaders(), ...extraHeaders, ...(options.headers ?? {}) },
   })
 
   if (res.status === 401) {
@@ -64,7 +81,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
         const retry = await fetch(url, {
           ...options,
           credentials: 'include',
-          headers: { ...authHeaders(), ...(options.headers ?? {}) },
+          headers: { ...authHeaders(), ...extraHeaders, ...(options.headers ?? {}) },
         })
         if (!retry.ok) {
           accessToken = null

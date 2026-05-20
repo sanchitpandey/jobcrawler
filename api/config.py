@@ -10,8 +10,10 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./jobcrawler.db"
 
-    # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    # Redis — empty means in-memory rate-limit buckets only (single-worker dev).
+    # Set REDIS_URL in env to share auth-throttle counters across workers / pods
+    # (audit fix N6).
+    redis_url: str = ""
 
     # JWT — must be explicitly provided in every environment. Audit fix #14:
     # removed the committed insecure default so a missing JWT_SECRET_KEY
@@ -68,6 +70,15 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     debug: bool = False
+
+    # Reverse-proxy / CDN front-door allowlist for trusted X-Forwarded-For
+    # parsing (audit fix N4). Comma-separated CIDRs in env (e.g.
+    # TRUSTED_PROXIES="10.0.0.0/8,172.16.0.0/12"). When EMPTY, the auth
+    # throttle ignores XFF entirely and uses ``request.client.host``, so a
+    # client cannot rotate XFF to bypass per-IP rate limits in dev/test or
+    # when the API is exposed directly. When set, the rightmost hop NOT in
+    # the allowlist is treated as the real client IP.
+    trusted_proxies: list[str] = []
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
