@@ -160,7 +160,11 @@ export function extractJobDetails(): JobDetails {
 }
 
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Defence-in-depth: only accept this command from our own SW/popup.
+    // A web page running in the same tab cannot forge sender.id.
+    if (sender.id && sender.id !== chrome.runtime.id) return
+    if (sender.tab !== undefined) return
     if (msg.type !== 'extract_job_details') return
 
     // If LinkedIn is showing an error/rate-limit page, return empty immediately.

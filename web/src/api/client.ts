@@ -2,35 +2,42 @@
 // In production VITE_API_URL=https://api.jobcrawler.io — direct HTTPS, FastAPI CORS handles it.
 const API_BASE: string = import.meta.env.VITE_API_URL ?? '/api'
 
-function getToken(): string | null {
-  return localStorage.getItem('access_token')
+// ── Token storage ─────────────────────────────────────────────────────────────
+//
+// Access token  : in-memory only. Lost on full page reload; AuthContext rehydrates
+//                 it via /auth/refresh (cookie-backed) at startup, so the UX is
+//                 unchanged but XSS can no longer exfiltrate the token.
+// Refresh token : NEVER read by JS. Lives in an httpOnly+SameSite=Strict cookie
+//                 set by the API on /auth/login and /auth/refresh, scoped to /auth.
+
+let accessToken: string | null = null
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token
 }
 
-function getRefreshToken(): string | null {
-  return localStorage.getItem('refresh_token')
+export function getAccessToken(): string | null {
+  return accessToken
 }
 
 function authHeaders(): HeadersInit {
-  const token = getToken()
   return {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
   }
 }
 
 async function tryRefresh(): Promise<boolean> {
-  const refresh = getRefreshToken()
-  if (!refresh) return false
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refresh }),
+      credentials: 'include',  // send the httpOnly refresh cookie
+      body: JSON.stringify({}),
     })
     if (!res.ok) return false
     const data = await res.json()
-    localStorage.setItem('access_token', data.access_token)
-    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+    accessToken = data.access_token
     return true
   } catch {
     return false
@@ -39,8 +46,11 @@ async function tryRefresh(): Promise<boolean> {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${path}`
+  // `credentials: 'include'` is needed so the browser sends the refresh cookie
+  // on /auth/* paths. For other paths it's harmless.
   const res = await fetch(url, {
     ...options,
+    credentials: 'include',
     headers: { ...authHeaders(), ...(options.headers ?? {}) },
   })
 
@@ -48,23 +58,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     // Only attempt refresh + redirect when we actually had a session token.
     // Without a token (e.g. a failed login attempt) this is a normal API error —
     // fall through so the caller receives the error message from the response body.
-    if (getToken()) {
+    if (accessToken) {
       const refreshed = await tryRefresh()
       if (refreshed) {
         const retry = await fetch(url, {
           ...options,
+          credentials: 'include',
           headers: { ...authHeaders(), ...(options.headers ?? {}) },
         })
         if (!retry.ok) {
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
+          accessToken = null
           window.location.href = '/login'
           throw new Error('Session expired')
         }
         return retry.json() as Promise<T>
       }
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
+      accessToken = null
       window.location.href = '/login'
       throw new Error('Session expired')
     }
@@ -103,4 +112,7 @@ export const api = {
     }),
 
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+
+  /** Attempt a silent refresh — used on app boot to rehydrate the access token. */
+  refresh: tryRefresh,
 }

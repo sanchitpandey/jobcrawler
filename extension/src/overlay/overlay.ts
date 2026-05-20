@@ -49,6 +49,26 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// ── Class-fragment allowlist (audit fix #20) ─────────────────────────────────
+//
+// Class modifiers interpolated into innerHTML template literals (`bucket`,
+// `meta.cls`, `scoreBucket`) are TypeScript-typed unions today, but a future
+// refactor that widens the type to `string` would silently re-open an XSS
+// surface. Pass every variant through ``safeCls`` so anything outside the
+// allowlist collapses to an empty string instead of injecting HTML.
+const _ALLOWED_CLASS_FRAGMENTS = new Set<string>([
+  "good",
+  "ok",
+  "poor",
+  "pattern",
+  "ai",
+  "review",
+]);
+
+function safeCls(value: string): string {
+  return _ALLOWED_CLASS_FRAGMENTS.has(value) ? value : "";
+}
+
 // ── Stylesheet injected into every shadow root ───────────────────────────────
 
 const OVERLAY_CSS = `
@@ -322,10 +342,14 @@ function createOverlayHost(id: string = HOST_ID): ShadowRoot {
 
   document.body.appendChild(host);
 
-  // `open` mode lets tests inspect the shadow root via host.shadowRoot.
-  // Closed mode adds zero security in a content-script context (page scripts
-  // can monkey-patch attachShadow), so we trade it for testability.
-  const shadow = host.attachShadow({ mode: "open" });
+  // Audit fix L6: closed mode so LinkedIn page JS cannot reach
+  // ``host.shadowRoot`` from the page's world and read or mutate the user's
+  // form-fill answers or score detail before the user reviews them. Content
+  // scripts run in an isolated world, so page-side monkey-patches of
+  // ``Element.prototype.attachShadow`` do not affect this call. Tests inspect
+  // the shadow root via ``__getActiveShadowRoot()`` rather than
+  // ``host.shadowRoot``.
+  const shadow = host.attachShadow({ mode: "closed" });
 
   const style = document.createElement("style");
   style.textContent = OVERLAY_CSS;
@@ -379,9 +403,10 @@ export function showScoreBadge(score: ScoreResponse): void {
     ? `<div class="jc-badge-comp">${escapeHtml(score.comp_est)}</div>`
     : "";
 
+  const safeBucket = safeCls(bucket);
   root.innerHTML = `
-    <div class="jc-badge" data-bucket="${bucket}">
-      <div class="jc-badge-circle jc-badge-circle--${bucket}">${score.fit_score}</div>
+    <div class="jc-badge" data-bucket="${safeBucket}">
+      <div class="jc-badge-circle jc-badge-circle--${safeBucket}">${escapeHtml(String(score.fit_score))}</div>
       <div class="jc-badge-text">${escapeHtml(verdict)} match</div>
       <div class="jc-badge-tag">jc</div>
       <div class="jc-badge-detail">
@@ -440,7 +465,7 @@ function renderField(
     <div class="jc-field${isReview ? " jc-field--review" : ""}">
       <div class="jc-field-header">
         <div class="jc-field-label">${escapeHtml(field.label || field.name)}</div>
-        <div class="jc-confidence jc-confidence--${meta.cls}">${escapeHtml(meta.text)}</div>
+        <div class="jc-confidence jc-confidence--${safeCls(meta.cls)}">${escapeHtml(meta.text)}</div>
       </div>
       ${inputHtml}
     </div>
@@ -485,9 +510,10 @@ export function showReviewPanel(
     const score = jobInfo.score;
     const scoreBucket =
       score === undefined ? null : badgeBucket(score);
+    const safeScoreBucket = scoreBucket ? safeCls(scoreBucket) : "";
     const scorePillHtml =
-      score !== undefined && scoreBucket
-        ? `<span class="jc-score-pill jc-score-pill--${scoreBucket}">${score} ${escapeHtml(
+      score !== undefined && safeScoreBucket
+        ? `<span class="jc-score-pill jc-score-pill--${safeScoreBucket}">${escapeHtml(String(score))} ${escapeHtml(
             verdictText(jobInfo.verdict, score),
           )}</span>`
         : "";
@@ -503,10 +529,10 @@ export function showReviewPanel(
       .map(escapeHtml)
       .join(" — ");
 
-    const scoreNum = score !== undefined ? String(score) : "";
-    const scoreRowHtml = score !== undefined && scoreBucket ? `
+    const scoreNum = score !== undefined ? escapeHtml(String(score)) : "";
+    const scoreRowHtml = score !== undefined && safeScoreBucket ? `
       <div class="jc-score-row">
-        <div class="jc-score-big jc-score-big--${scoreBucket}">${scoreNum}</div>
+        <div class="jc-score-big jc-score-big--${safeScoreBucket}">${scoreNum}</div>
         <div>
           ${scorePillHtml}
           <div class="jc-job-title">${escapeHtml(jobInfo.title)}</div>

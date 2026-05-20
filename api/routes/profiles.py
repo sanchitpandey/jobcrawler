@@ -537,14 +537,22 @@ async def download_resume(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
 
     resume_path = Path(profile.resume_path)
-    if not resume_path.exists() or not resume_path.is_file():
+    # Audit fix #15: defense-in-depth against path-traversal — refuse to serve
+    # any file whose resolved location escapes UPLOAD_DIR, even though
+    # resume_path is server-written today.
+    try:
+        resolved = resume_path.resolve(strict=True)
+        resolved.relative_to(UPLOAD_DIR.resolve())
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+    if not resolved.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
 
     return FileResponse(
-        path=resume_path,
+        path=resolved,
         media_type="application/pdf",
-        filename=resume_path.name,
-        headers={"Content-Disposition": f'attachment; filename="{resume_path.name}"'},
+        filename=resolved.name,
+        headers={"Content-Disposition": f'attachment; filename="{resolved.name}"'},
     )
 
 

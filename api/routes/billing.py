@@ -14,6 +14,7 @@ import razorpay
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import get_settings
@@ -21,7 +22,8 @@ from api.logger import get_logger
 from api.models.base import get_db
 from api.models.subscription import Subscription
 from api.models.user import User
-from api.routes.auth import get_current_user
+from api.models.webhook_event import WebhookEvent
+from api.routes.auth import get_current_user, require_verified_user
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 log = get_logger(__name__)
@@ -84,7 +86,14 @@ async def _activate_subscription(
     razorpay_order_id: str,
     razorpay_payment_id: str,
 ) -> Subscription:
-    """Create a subscription row and upgrade the user tier."""
+    """
+    Create a subscription row and upgrade the user tier.
+
+    Race-safe: ``Subscription.razorpay_payment_id`` carries a unique constraint
+    (see migration f7a8b9c0d1e2). If a concurrent /verify-payment + webhook
+    both reach this function, the second commit raises IntegrityError; we
+    swallow it and return the row that won the race.
+    """
     plan = PLANS[plan_key]
     now = datetime.now(timezone.utc)
     sub = Subscription(
@@ -100,7 +109,23 @@ async def _activate_subscription(
     )
     db.add(sub)
     user.tier = "paid"
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = await db.execute(
+            select(Subscription).where(
+                Subscription.razorpay_payment_id == razorpay_payment_id
+            )
+        )
+        won = existing.scalar_one_or_none()
+        if won is None:
+            raise
+        # The other path activated; make sure tier reflects that.
+        if user.tier != "paid":
+            user.tier = "paid"
+            await db.commit()
+        return won
     await db.refresh(sub)
     return sub
 
@@ -110,7 +135,7 @@ async def _activate_subscription(
 @router.post("/create-order", response_model=CreateOrderResponse)
 async def create_order(
     req: CreateOrderRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
 ) -> CreateOrderResponse:
     """Create a Razorpay order for the selected plan."""
     settings = get_settings()
@@ -147,7 +172,7 @@ async def create_order(
 @router.post("/verify-payment", response_model=VerifyPaymentResponse)
 async def verify_payment(
     req: VerifyPaymentRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> VerifyPaymentResponse:
     """Verify Razorpay payment signature and activate subscription."""
@@ -187,9 +212,39 @@ async def verify_payment(
         log.error("razorpay order fetch failed", extra={"error": str(exc)})
         raise HTTPException(status_code=502, detail="Failed to fetch order")
 
-    plan_key = order.get("notes", {}).get("plan", "monthly")
+    notes = order.get("notes", {}) or {}
+    # Authorization: signatures alone don't bind a payment to a user. Confirm
+    # the order was created by *this* user before granting paid tier (fix #3:
+    # cross-user payment hijack).
+    if str(notes.get("user_id") or "") != str(current_user.id):
+        log.warning(
+            "verify-payment user mismatch",
+            extra={
+                "user_id": current_user.id,
+                "order_user_id": notes.get("user_id"),
+                "order_id": req.razorpay_order_id,
+            },
+        )
+        raise HTTPException(status_code=403, detail="Order does not belong to this user")
+
+    plan_key = notes.get("plan", "monthly")
     if plan_key not in PLANS:
         raise HTTPException(status_code=400, detail=f"Unknown plan: {plan_key}")
+
+    # Defence in depth: confirm paid amount + currency match the catalogue (fix #8).
+    expected = PLANS[plan_key]
+    if int(order.get("amount", 0)) != expected["amount"] or order.get("currency") != "INR":
+        log.warning(
+            "verify-payment amount/currency mismatch",
+            extra={
+                "user_id": current_user.id,
+                "order_id": req.razorpay_order_id,
+                "expected": expected["amount"],
+                "got": order.get("amount"),
+                "currency": order.get("currency"),
+            },
+        )
+        raise HTTPException(status_code=400, detail="Order amount/currency mismatch")
 
     sub = await _activate_subscription(
         db,
@@ -226,12 +281,40 @@ async def razorpay_webhook(
             body.decode(), signature, settings.razorpay_webhook_secret
         )
     except razorpay.errors.SignatureVerificationError:
-        log.warning("invalid webhook signature")
-        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+        # Audit fix #18: return 200 so probes can't distinguish "good secret,
+        # bad signature" from "wrong secret" and so Razorpay doesn't retry
+        # forever on a config drift. The auditable trail lives in the log.
+        log.warning(
+            "invalid webhook signature",
+            extra={"signature_present": bool(signature)},
+        )
+        return {"status": "ignored"}
 
     payload = await request.json()
     event = payload.get("event")
-    log.info("razorpay webhook received", extra={"event": event})
+    event_id = payload.get("id") or payload.get("event_id") or ""
+    log.info("razorpay webhook received", extra={"event": event, "event_id": event_id})
+
+    # Audit fix #19: replay protection on event-id. Razorpay events carry a
+    # globally-unique ``id``; once seen, ignore. Idempotency-by-payment_id
+    # alone is not enough (different events can share a payment_id, and a
+    # captured-event replay should not re-credit on resubscribe flows).
+    if event_id:
+        seen = await db.execute(
+            select(WebhookEvent).where(WebhookEvent.event_id == event_id)
+        )
+        if seen.scalar_one_or_none():
+            return {"status": "already_processed"}
+
+    async def _mark_seen() -> None:
+        if not event_id:
+            return
+        db.add(WebhookEvent(event_id=event_id, event_type=event or "unknown"))
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Another worker raced us to record the same event_id — fine.
+            await db.rollback()
 
     if event == "payment.captured":
         entity = payload["payload"]["payment"]["entity"]
@@ -245,6 +328,7 @@ async def razorpay_webhook(
             )
         )
         if existing.scalar_one_or_none():
+            await _mark_seen()
             return {"status": "already_processed"}
 
         # Need user_id and plan — fetch from order notes
@@ -259,17 +343,21 @@ async def razorpay_webhook(
         plan_key = notes.get("plan", "monthly")
         if not user_id or plan_key not in PLANS:
             log.warning("webhook missing notes", extra={"order_id": order_id})
+            await _mark_seen()
             return {"status": "ignored"}
 
         user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one_or_none()
         if not user:
             log.warning("webhook user not found", extra={"user_id": user_id})
+            await _mark_seen()
             return {"status": "ignored"}
 
         await _activate_subscription(db, user, plan_key, order_id, payment_id)
+        await _mark_seen()
         return {"status": "processed"}
 
+    await _mark_seen()
     return {"status": "ok"}
 
 

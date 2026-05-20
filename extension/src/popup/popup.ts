@@ -600,7 +600,11 @@ completeDiscoverBtn.addEventListener("click", () => {
 
 // ── Runtime message listener ──────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((msg: Record<string, unknown>) => {
+chrome.runtime.onMessage.addListener((msg: Record<string, unknown>, sender) => {
+  // Popup only listens to status pings from our SW. Reject anything from a tab
+  // or another extension.
+  if (sender.id && sender.id !== chrome.runtime.id) return;
+  if (sender.tab !== undefined) return;
   if (msg.type === "discovery_status") {
     onDiscoveryStatus(msg);
   } else if (msg.type === "auto_apply_progress") {

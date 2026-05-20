@@ -45,15 +45,27 @@ if settings.sentry_dsn:
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Attach security headers to every response."""
+    """Attach security headers to every response.
+
+    Audit fix #17: dropped the deprecated ``X-XSS-Protection`` header (modern
+    browsers ignore it and pre-Chromium versions had exploitable bugs) and
+    added Content-Security-Policy, Cross-Origin-Opener-Policy, and
+    Cross-Origin-Resource-Policy so a stray HTML response (errors, /docs in
+    dev) can't pull script or be embedded across origins.
+    """
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # API never serves HTML that should run script or be framed.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        )
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-site"
         if settings.app_env == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
@@ -85,14 +97,19 @@ app = FastAPI(
 
 # Middleware order: outermost first (security headers → CORS → logging → route handlers)
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(
-    CORSMiddleware,
+_cors_kwargs: dict = dict(
     allow_origins=settings.allowed_origins,
-    allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+# fix #11: pin chrome-extension CORS to the published extension ID(s) instead of
+# trusting every extension in the user's browser. The regex is built from the
+# ALLOWED_EXTENSION_IDS env var; production startup fails when it's empty.
+_ext_regex = settings.extension_origin_regex
+if _ext_regex is not None:
+    _cors_kwargs["allow_origin_regex"] = _ext_regex
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(auth.router)

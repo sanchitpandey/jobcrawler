@@ -13,7 +13,16 @@
   "host_permissions": [
     "http://localhost:8000/*",
     "https://api.jobcrawler.app/*",
-    "<all_urls>"
+    "https://www.linkedin.com/*",
+    "https://*.indeed.com/*",
+    "https://boards.greenhouse.io/*",
+    "https://*.greenhouse.io/*",
+    "https://grnh.se/*",
+    "https://jobs.lever.co/*",
+    "https://*.lever.co/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.icims.com/*"
   ],
   "background": {
     "service_worker": "dist/service-worker.js",
@@ -26,7 +35,19 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://www.linkedin.com/jobs/*",
+        "https://www.linkedin.com/apply/*",
+        "https://*.indeed.com/*",
+        "https://boards.greenhouse.io/*",
+        "https://*.greenhouse.io/*",
+        "https://grnh.se/*",
+        "https://jobs.lever.co/*",
+        "https://*.lever.co/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.icims.com/*"
+      ],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
     }

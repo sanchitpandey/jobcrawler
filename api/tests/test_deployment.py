@@ -67,12 +67,14 @@ def test_production_config_rejects_weak_jwt() -> None:
         )
 
 
-def test_production_config_rejects_default_jwt() -> None:
+def test_config_requires_minimum_jwt_length() -> None:
+    # Audit fix #14: the 32-char minimum applies in every environment, not
+    # just production — there is no longer a committed default secret.
     with pytest.raises(ValueError, match="JWT_SECRET_KEY"):
         Settings(
-            app_env="production",
-            jwt_secret_key="change-me-in-production-use-32-plus-random-chars",
-            allowed_origins=["https://example.com"],
+            app_env="development",
+            jwt_secret_key="too-short",
+            allowed_origins=["http://localhost:3000"],
         )
 
 
@@ -93,6 +95,7 @@ def test_production_config_accepts_valid_settings() -> None:
             "https://jobcrawler.app",
             "chrome-extension://abcdefghijklmnopqrstuvwxyz123456",
         ],
+        allowed_extension_ids=["abcdefghijklmnopqrstuvwxyz123456"],
     )
     assert settings.app_env == "production"
 
@@ -100,7 +103,7 @@ def test_production_config_accepts_valid_settings() -> None:
 def test_development_config_allows_http_origins() -> None:
     settings = Settings(
         app_env="development",
-        jwt_secret_key="weak",
+        jwt_secret_key="a" * 32,  # audit fix #14: 32-char floor applies everywhere
         allowed_origins=["http://localhost:3000"],
     )
     assert settings.app_env == "development"
@@ -125,4 +128,10 @@ async def test_security_headers_present(test_client: AsyncClient) -> None:
     response = await test_client.get("/health")
     assert response.headers.get("x-content-type-options") == "nosniff"
     assert response.headers.get("x-frame-options") == "DENY"
-    assert response.headers.get("x-xss-protection") == "1; mode=block"
+    # Audit fix #17: dropped deprecated X-XSS-Protection, added CSP/COOP/CORP.
+    assert "x-xss-protection" not in {k.lower() for k in response.headers}
+    csp = response.headers.get("content-security-policy", "")
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert response.headers.get("cross-origin-opener-policy") == "same-origin"
+    assert response.headers.get("cross-origin-resource-policy") == "same-site"

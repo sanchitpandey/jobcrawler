@@ -151,11 +151,15 @@ async def test_update_status_other_user_returns_404(
     create_resp = await test_client.post("/jobs", json=_JOB_PAYLOAD, headers=headers)
     app_id = create_resp.json()["id"]
 
-    # Register a second user
-    r = await test_client.post(
-        "/auth/register", json={"email": "other@example.com", "password": "otherpass1"}
+    # Register + login a second user
+    pw = "otherpass-1234"
+    await test_client.post(
+        "/auth/register", json={"email": "other@example.com", "password": pw}
     )
-    other_token = r.json()["access_token"]
+    login = await test_client.post(
+        "/auth/login", json={"email": "other@example.com", "password": pw}
+    )
+    other_token = login.json()["access_token"]
     other_headers = {"Authorization": f"Bearer {other_token}"}
 
     resp = await test_client.patch(

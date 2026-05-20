@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, setAccessToken } from '../api/client'
 import type { User, LoginResponse } from '../api/types'
 
 interface AuthContextValue {
@@ -31,9 +31,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Access token lives in memory only (set by api/client). Refresh token is the
+  // httpOnly cookie set by the API — never visible to JS.
   function storeTokens(data: LoginResponse) {
-    localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
+    setAccessToken(data.access_token)
     scheduleRefresh(data.access_token)
   }
 
@@ -44,13 +45,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const delay = exp - Date.now() - 5 * 60 * 1000
     if (delay <= 0) return
     refreshTimer.current = setTimeout(async () => {
-      const refresh = localStorage.getItem('refresh_token')
-      if (!refresh) return
+      // The httpOnly refresh cookie is sent automatically.
+      const ok = await api.refresh()
+      if (!ok) {
+        logout()
+        return
+      }
+      // After a successful refresh, fetch a fresh access token expiry.
       try {
-        const data = await api.post<LoginResponse>('/auth/refresh', { refresh_token: refresh })
-        localStorage.setItem('access_token', data.access_token)
-        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
-        scheduleRefresh(data.access_token)
+        const me = await api.get<User>('/auth/me')
+        setUser(me)
       } catch {
         logout()
       }
@@ -58,20 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      setLoading(false)
-      return
-    }
+    // On boot, try a silent refresh against the cookie. If the server has a
+    // valid refresh row, we get a fresh access token without any user action.
     api
-      .get<User>('/auth/me')
-      .then((u) => {
-        setUser(u)
-        scheduleRefresh(token)
-      })
-      .catch(() => {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
+      .refresh()
+      .then((ok) => {
+        if (!ok) {
+          setLoading(false)
+          return
+        }
+        return api
+          .get<User>('/auth/me')
+          .then((u) => setUser(u))
+          .catch(() => undefined)
       })
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,11 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function register(email: string, password: string) {
-    const data = await api.post<LoginResponse>('/auth/register', { email, password })
-    storeTokens(data)
-    const me = await api.get<User>('/auth/me')
-    setUser(me)
-    navigate('/verify-email')
+    // Registration now returns 202 with no tokens (fix #9: no user enumeration).
+    // The user must check their email and click /verify-email before logging in.
+    await api.post('/auth/register', { email, password })
+    navigate(`/login?verify=1&email=${encodeURIComponent(email)}`)
   }
 
   async function verifyEmail(code: string) {
@@ -102,10 +104,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.post('/auth/resend-verification')
   }
 
-  function logout() {
+  async function logout() {
     if (refreshTimer.current) clearTimeout(refreshTimer.current)
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    try {
+      // Best-effort: revoke the server-side refresh row + clear the cookie.
+      await api.post('/auth/logout')
+    } catch {
+      /* ignore */
+    }
+    setAccessToken(null)
     setUser(null)
     navigate('/login')
   }

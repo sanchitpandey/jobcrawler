@@ -24,6 +24,9 @@ pytestmark = pytest.mark.asyncio
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_PLAN_AMOUNTS = {"monthly": 49900, "annual": 499900}
+
+
 def _make_fake_client(
     order_id: str = "order_test123",
     plan_in_notes: str = "monthly",
@@ -32,17 +35,18 @@ def _make_fake_client(
     raise_webhook_signature: bool = False,
 ):
     """Build a MagicMock that mimics razorpay.Client."""
+    amount = _PLAN_AMOUNTS.get(plan_in_notes, 49900)
     fake = MagicMock()
-    # order.create
     fake.order.create.return_value = {
         "id": order_id,
-        "amount": 49900,
+        "amount": amount,
         "currency": "INR",
         "notes": {"plan": plan_in_notes, "user_id": user_id},
     }
-    # order.fetch
     fake.order.fetch.return_value = {
         "id": order_id,
+        "amount": amount,
+        "currency": "INR",
         "notes": {"plan": plan_in_notes, "user_id": user_id},
     }
     # signature verification
@@ -158,7 +162,8 @@ async def test_create_order_invalid_plan(
 async def test_verify_payment_success(
     test_client: AsyncClient, registered_user: dict, auth_headers: dict
 ):
-    fake = _make_fake_client(order_id="order_v1", plan_in_notes="monthly")
+    user = await _get_user_by_email(registered_user["email"])
+    fake = _make_fake_client(order_id="order_v1", plan_in_notes="monthly", user_id=user.id)
     with patch("api.routes.billing._razorpay_client", return_value=fake):
         resp = await test_client.post(
             "/billing/verify-payment",
@@ -209,7 +214,8 @@ async def test_verify_payment_idempotent(
     test_client: AsyncClient, registered_user: dict, auth_headers: dict
 ):
     """Verifying the same payment twice should not create duplicate rows."""
-    fake = _make_fake_client(order_id="order_idem", plan_in_notes="monthly")
+    user = await _get_user_by_email(registered_user["email"])
+    fake = _make_fake_client(order_id="order_idem", plan_in_notes="monthly", user_id=user.id)
     body = {
         "razorpay_order_id": "order_idem",
         "razorpay_payment_id": "pay_idem",
@@ -236,7 +242,8 @@ async def test_verify_payment_idempotent(
 async def test_verify_payment_annual_plan(
     test_client: AsyncClient, registered_user: dict, auth_headers: dict
 ):
-    fake = _make_fake_client(order_id="order_an", plan_in_notes="annual")
+    user = await _get_user_by_email(registered_user["email"])
+    fake = _make_fake_client(order_id="order_an", plan_in_notes="annual", user_id=user.id)
     with patch("api.routes.billing._razorpay_client", return_value=fake):
         resp = await test_client.post(
             "/billing/verify-payment",
@@ -313,7 +320,11 @@ async def test_webhook_invalid_signature(test_client: AsyncClient):
                 json={"event": "payment.captured"},
                 headers={"X-Razorpay-Signature": "bad"},
             )
-    assert resp.status_code == 400
+    # Audit fix #18: bad signature now returns 200 {"status":"ignored"} so a
+    # probe can't distinguish secret-misconfig from secret-mismatch and so
+    # Razorpay doesn't retry-storm on a config drift.
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ignored"}
 
 
 async def test_webhook_idempotent(
@@ -371,7 +382,8 @@ async def test_billing_status_paid(
     test_client: AsyncClient, registered_user: dict, auth_headers: dict
 ):
     """After verify-payment succeeds, /status should report paid + active."""
-    fake = _make_fake_client(order_id="order_st", plan_in_notes="monthly")
+    user = await _get_user_by_email(registered_user["email"])
+    fake = _make_fake_client(order_id="order_st", plan_in_notes="monthly", user_id=user.id)
     with patch("api.routes.billing._razorpay_client", return_value=fake):
         await test_client.post(
             "/billing/verify-payment",

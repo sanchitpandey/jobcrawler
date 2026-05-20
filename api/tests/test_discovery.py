@@ -554,18 +554,45 @@ async def test_stats_returns_dashboard_payload(
     assert resp.status_code == 200
 
     body = resp.json()
-    # The "month-only" application (month_start + 1 day) can fall inside the
-    # current ISO week when the month boundary lands mid-week, adding +1 to
-    # week-scoped counts.  scored_at defaults to now(), so it's always in-week;
-    # only applied_at / the explicit scored_at determine week membership.
-    month_only_exists = month_start != week_start
-    month_only_in_week = month_only_exists and (month_start + timedelta(days=1) >= week_start)
 
-    expected_week_count = 7 if month_only_in_week else 6
-    expected_month_count = 7 if month_only_exists else 6
-    expected_discovered_count = 10 if month_only_in_week else 9
-    expected_scored_count = 9 if month_only_in_week else 8
-    expected_good_count = 3 if month_only_exists else 2
+    # Compute expected counts dynamically by mirroring the API's time buckets
+    # against the exact fixtures created above. Previous hand-coded expectations
+    # assumed week_start sits in a different month from today, which breaks for
+    # most of every month.
+    month_only_exists = month_start != week_start
+    fixtures = [
+        # (status, applied_at, scored_at, fit_score)
+        *[("applied", now - timedelta(hours=i), week_start + timedelta(days=1), s)
+          for i, s in enumerate([95, 75, 55, 35, 82], start=1)],
+        ("applied", now - timedelta(days=2), week_start + timedelta(days=2), 65),
+        ("approved", None, week_start + timedelta(days=1), 88),
+        ("scored", None, week_start + timedelta(days=1), 45),
+        ("discovered", None, week_start + timedelta(days=1), None),
+        ("applied", week_start - timedelta(days=1), week_start - timedelta(days=1), 90),
+    ]
+    if month_only_exists:
+        fixtures.append((
+            "applied",
+            month_start + timedelta(days=1),
+            month_start + timedelta(days=1),
+            61,
+        ))
+
+    def _is_applied(f):
+        return f[0] == "applied" and f[1] is not None
+
+    expected_month_count = sum(
+        1 for f in fixtures if _is_applied(f) and f[1] >= month_start
+    )
+    expected_discovered_count = sum(
+        1 for f in fixtures if f[2] >= week_start
+    )
+    expected_scored_count = sum(
+        1 for f in fixtures if f[2] >= week_start and f[3] is not None
+    )
+    expected_good_count = sum(
+        1 for f in fixtures if f[3] is not None and 60 <= f[3] < 80
+    )
     assert body["applied_this_month"] == expected_month_count
     assert body["queue_approved"] == 1
     assert body["queue_needs_review"] == 1

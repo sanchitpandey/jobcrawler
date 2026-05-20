@@ -18,7 +18,7 @@ from api.middleware.usage import record_usage
 from api.models.base import get_db
 from api.models.profile import Profile
 from api.models.user import User
-from api.routes.auth import get_current_user
+from api.routes.auth import get_current_user, require_verified_user
 from api.services.cover_letter import generate_cover
 from api.services.form_filler import FilledAnswer, answer_question_for_user
 from api.services.llm import current_model
@@ -71,7 +71,7 @@ class GenerateCoverResponse(BaseModel):
              dependencies=[Depends(check_llm_limit)])
 async def answer_fields(
     req: AnswerFieldsRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> AnswerFieldsResponse:
     result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
@@ -127,7 +127,7 @@ async def answer_fields(
              dependencies=[Depends(check_llm_limit)])
 async def generate_cover_letter(
     req: GenerateCoverRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> GenerateCoverResponse:
     result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))

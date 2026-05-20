@@ -5,8 +5,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).parent / ".env"
 
-_INSECURE_JWT_DEFAULT = "change-me-in-production-use-32-plus-random-chars"
-
 
 class Settings(BaseSettings):
     # Database
@@ -15,11 +13,19 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # JWT
-    jwt_secret_key: str = _INSECURE_JWT_DEFAULT
+    # JWT — must be explicitly provided in every environment. Audit fix #14:
+    # removed the committed insecure default so a missing JWT_SECRET_KEY
+    # fails fast at startup instead of silently issuing forgeable tokens.
+    jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24      # 24 h
     jwt_refresh_token_expire_days: int = 30
+    # Issuer + audience claims (audit fix L1). The issuer ties a token to a
+    # specific deployment (so a leaked dev secret can't forge prod tokens even
+    # if the HS256 key was accidentally reused), and the audience pins tokens
+    # to this API (so a token minted for a sibling service is rejected here).
+    jwt_issuer: str = "jobcrawler-api"
+    jwt_audience: str = "jobcrawler-api"
 
     # LLM providers
     groq_api_key: str = ""
@@ -37,6 +43,10 @@ class Settings(BaseSettings):
         "https://jobcrawler.dev",
         "https://www.jobcrawler.dev",
     ]
+    # Comma-separated list of published Chrome extension IDs allowed to call the
+    # API with credentials. Empty in production fails the startup check (fix #11:
+    # CORS regex previously trusted ALL chrome-extension:// origins).
+    allowed_extension_ids: list[str] = []
 
     # Subscription limits
     free_tier_weekly_limit: int = 5
@@ -67,17 +77,34 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _production_checks(self) -> "Settings":
+        if len(self.jwt_secret_key) < 32:
+            raise ValueError(
+                "JWT_SECRET_KEY must be set to a random string of at least 32 characters"
+            )
         if self.app_env == "production":
-            if self.jwt_secret_key == _INSECURE_JWT_DEFAULT or len(self.jwt_secret_key) < 32:
-                raise ValueError(
-                    "JWT_SECRET_KEY must be set to a random string of at least 32 characters in production"
-                )
             insecure = [o for o in self.allowed_origins if not o.startswith(("https://", "chrome-extension://"))]
             if insecure:
                 raise ValueError(
                     f"Non-HTTPS origins not allowed in production: {insecure}"
                 )
+            if not self.allowed_extension_ids:
+                raise ValueError(
+                    "ALLOWED_EXTENSION_IDS must list the production extension ID(s) "
+                    "to scope chrome-extension CORS in production"
+                )
         return self
+
+    @property
+    def extension_origin_regex(self) -> str | None:
+        """Build a strict chrome-extension allowlist regex from configured IDs.
+
+        Returns None when no extension IDs are configured (dev convenience —
+        production startup requires at least one, see ``_production_checks``).
+        """
+        ids = [eid.strip() for eid in self.allowed_extension_ids if eid.strip()]
+        if not ids:
+            return None
+        return r"^chrome-extension://(" + "|".join(ids) + r")$"
 
 
 @lru_cache

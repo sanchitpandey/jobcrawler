@@ -66,10 +66,15 @@ async def test_paid_tier_unlimited(test_client: AsyncClient):
 
     reg = await test_client.post(
         "/auth/register",
-        json={"email": "paid@example.com", "password": "paidpass1"},
+        json={"email": "paid@example.com", "password": "paidpass-1234"},
     )
-    assert reg.status_code == 201
-    token = reg.json()["access_token"]
+    assert reg.status_code == 202
+    login = await test_client.post(
+        "/auth/login",
+        json={"email": "paid@example.com", "password": "paidpass-1234"},
+    )
+    assert login.status_code == 200
+    token = login.json()["access_token"]
     paid_headers = {"Authorization": f"Bearer {token}"}
 
     # Create profile for paid user
@@ -79,7 +84,8 @@ async def test_paid_tier_unlimited(test_client: AsyncClient):
         headers=paid_headers,
     )
 
-    # Promote to paid tier via the test DB override
+    # Promote to paid tier via the test DB override + mark verified so
+    # require_verified_user (audit fix #16) doesn't block the test flow.
     override = app.dependency_overrides.get(_get_db)
     if override:
         async for session in override():
@@ -88,6 +94,7 @@ async def test_paid_tier_unlimited(test_client: AsyncClient):
             )
             user = result.scalar_one()
             user.tier = "paid"
+            user.is_verified = True
             await session.commit()
             break
 
@@ -119,13 +126,15 @@ async def test_llm_daily_limit_blocks_score_job(
     assert profile_resp.status_code == 200
 
     # Decode user id from JWT
-    from jose import jwt as jose_jwt
+    import jwt as jose_jwt
     from api.main import app
     access_token = headers["Authorization"].split(" ", 1)[1]
     payload = jose_jwt.decode(
         access_token,
         settings.jwt_secret_key,
         algorithms=[settings.jwt_algorithm],
+        issuer=settings.jwt_issuer,
+        audience=settings.jwt_audience,
     )
     user_id = payload["sub"]
 

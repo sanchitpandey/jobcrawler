@@ -39,7 +39,11 @@ class Subscription(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
 
     razorpay_order_id: Mapped[str | None] = mapped_column(String(100), index=True)
-    razorpay_payment_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    # Unique: prevents double-credit when /verify-payment and the webhook race
+    # (the migration enforces this on existing tables; see f7a8b9c0d1e2).
+    razorpay_payment_id: Mapped[str | None] = mapped_column(
+        String(100), index=True, unique=True
+    )
     razorpay_subscription_id: Mapped[str | None] = mapped_column(String(100))
 
     # Amount in paise (49900 = ₹499)

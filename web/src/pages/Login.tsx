@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
 export function Login() {
   const { login } = useAuth()
+  const [params] = useSearchParams()
+  const resetSuccess = params.get('reset') === '1'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -43,6 +45,11 @@ export function Login() {
         </div>
 
         <form onSubmit={handleSubmit} className="border border-line2 rounded-xl bg-ink2/60 p-7 space-y-5">
+          {resetSuccess && (
+            <div className="border border-green-500/30 bg-green-500/10 rounded-lg px-4 py-3 font-mono text-xs text-green-400">
+              Password reset — sign in with your new password.
+            </div>
+          )}
           {error && (
             <div className="border border-red-soft/30 bg-red-soft/10 rounded-lg px-4 py-3 font-mono text-xs text-red-soft space-y-1">
               <div>{error}</div>
@@ -71,7 +78,12 @@ export function Login() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="font-mono text-[11px] uppercase tracking-wider text-cream2">Password</label>
+            <div className="flex items-center justify-between">
+              <label className="font-mono text-[11px] uppercase tracking-wider text-cream2">Password</label>
+              <Link to="/forgot-password" className="font-mono text-[11px] text-amber hover:underline underline-offset-2">
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               value={password}

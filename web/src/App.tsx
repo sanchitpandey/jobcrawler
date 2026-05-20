@@ -16,6 +16,8 @@ import { Billing } from './pages/Billing'
 import { Settings } from './pages/Settings'
 import { NotFound } from './pages/NotFound'
 import { VerifyEmail } from './pages/VerifyEmail'
+import { ForgotPassword } from './pages/ForgotPassword'
+import { ResetPassword } from './pages/ResetPassword'
 
 function AppRoutes() {
   return (
@@ -24,6 +26,8 @@ function AppRoutes() {
       <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
       <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+      <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
+      <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
 
       {/* Standalone protected (no sidebar layout) */}
       <Route path="/verify-email" element={<ProtectedRoute><VerifyEmail /></ProtectedRoute>} />

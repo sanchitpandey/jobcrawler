@@ -26,7 +26,7 @@ from api.models.application import Application
 from api.models.base import get_db
 from api.models.profile import Profile
 from api.models.user import User
-from api.routes.auth import get_current_user
+from api.routes.auth import get_current_user, require_verified_user
 from api.services.filter import make_id
 from api.services.scorer import score_job
 
@@ -167,7 +167,7 @@ async def _require_profile(user_id: str, db: AsyncSession) -> Profile:
              dependencies=[Depends(check_llm_limit)])
 async def score_job_endpoint(
     req: ScoreJobRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScoreJobResponse:
     """Score a job against the user's profile. Does not persist to the tracker."""
@@ -224,7 +224,7 @@ async def get_apply_usage(
              dependencies=[Depends(check_apply_limit)])
 async def track_job(
     req: TrackJobRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApplicationResponse:
     """Add a job to the application tracker.

@@ -3,7 +3,11 @@
 // { type: "OFFSCREEN_FETCH_RESULT", requestId, html, status }.
 
 chrome.runtime.onMessage.addListener(
-  (msg: { type: string; url?: string; requestId?: string }, _sender, sendResponse) => {
+  (msg: { type: string; url?: string; requestId?: string }, sender, sendResponse) => {
+    // Only accept fetch requests from our own SW. Cross-extension or tab origin
+    // is rejected — this listener is otherwise a SSRF-style proxy.
+    if (sender.id && sender.id !== chrome.runtime.id) return;
+    if (sender.tab !== undefined) return;
     if (msg.type !== "OFFSCREEN_FETCH" || !msg.url || !msg.requestId) return;
 
     const { url, requestId } = msg;

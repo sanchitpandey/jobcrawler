@@ -26,12 +26,15 @@ const SCORE: ScoreResponse = {
 };
 
 describe("Shadow DOM isolation", () => {
-  it("test_shadow_dom_created: badge host has shadow root", () => {
+  it("test_shadow_dom_created: badge host has a closed shadow root", () => {
     showScoreBadge(SCORE);
     const host = document.getElementById("jobcrawler-badge-host")!;
     expect(host).not.toBeNull();
-    expect(host.shadowRoot).not.toBeNull();
-    expect(__getActiveShadowRoot()).toBe(host.shadowRoot);
+    // Audit fix L6: closed mode — page-world code can no longer reach the
+    // shadow root via host.shadowRoot. The content script accesses it through
+    // the module-level handle exposed by __getActiveShadowRoot().
+    expect(host.shadowRoot).toBeNull();
+    expect(__getActiveShadowRoot()).not.toBeNull();
   });
 
   it("test_styles_isolated: overlay carries its own stylesheet inside the shadow root", () => {

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.models.base import Base
@@ -29,6 +29,12 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verification_token: Mapped[str | None] = mapped_column(String(255))
     verification_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Number of failed verification/reset code attempts. Reset on success.
+    verification_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Number of consecutive failed logins. Reset on success.
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # If set in the future, all logins are temporarily refused.
+    lockout_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # "free" | "paid"
     tier: Mapped[str] = mapped_column(String(20), default="free", nullable=False)

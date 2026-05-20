@@ -377,7 +377,13 @@ class DiscoveryOrchestrator {
         resolve(null);
       }, 15_000);
 
-      const listener = (msg: { type: string; requestId?: string; html?: string; status?: number }): void => {
+      const listener = (
+        msg: { type: string; requestId?: string; html?: string; status?: number },
+        sender: chrome.runtime.MessageSender,
+      ): void => {
+        // Only accept the response from our own offscreen document (no tab, own id).
+        if (sender.id && sender.id !== chrome.runtime.id) return;
+        if (sender.tab !== undefined) return;
         if (msg.type !== "OFFSCREEN_FETCH_RESULT" || msg.requestId !== requestId) return;
         clearTimeout(timeout);
         chrome.runtime.onMessage.removeListener(listener);

@@ -32,12 +32,26 @@ _JOB_BASE = {
 }
 
 
-def _fake_razorpay_client(order_id: str, plan: str = "monthly") -> MagicMock:
+_PLAN_AMOUNTS = {"monthly": 49900, "annual": 499900}
+
+
+def _fake_razorpay_client(order_id: str, plan: str = "monthly", user_id: str = "") -> MagicMock:
     fake = MagicMock()
-    fake.order.create.return_value = {"id": order_id, "amount": 49900, "currency": "INR"}
-    fake.order.fetch.return_value = {"id": order_id, "notes": {"plan": plan}}
+    amount = _PLAN_AMOUNTS[plan]
+    fake.order.create.return_value = {"id": order_id, "amount": amount, "currency": "INR"}
+    fake.order.fetch.return_value = {
+        "id": order_id,
+        "amount": amount,
+        "currency": "INR",
+        "notes": {"plan": plan, "user_id": user_id},
+    }
     fake.utility.verify_payment_signature.return_value = True
     return fake
+
+
+async def _user_id_from_headers(test_client: AsyncClient, headers: dict) -> str:
+    me = await test_client.get("/auth/me", headers=headers)
+    return me.json()["id"]
 
 
 async def _track_job(client: AsyncClient, headers: dict, suffix: str) -> int:
@@ -76,8 +90,9 @@ async def test_paid_user_unlimited_after_upgrade(
     # 6th application — should now be blocked
     assert await _track_job(test_client, headers, "pre6") == 429
 
-    # Upgrade via mocked Razorpay
-    fake = _fake_razorpay_client("order_up", plan="monthly")
+    # Upgrade via mocked Razorpay — order.notes.user_id must match the caller.
+    uid = await _user_id_from_headers(test_client, headers)
+    fake = _fake_razorpay_client("order_up", plan="monthly", user_id=uid)
     with patch("api.routes.billing._razorpay_client", return_value=fake):
         resp = await test_client.post(
             "/billing/verify-payment",
@@ -106,7 +121,7 @@ async def test_free_user_llm_limited(
     from api.main import app
     from api.models.base import get_db as _get_db
     from api.models.llm_usage import LlmUsageLog
-    from jose import jwt as jose_jwt
+    import jwt as jose_jwt
 
     settings = get_settings()
     limit = settings.free_tier_daily_llm_calls
@@ -118,6 +133,8 @@ async def test_free_user_llm_limited(
         access_token,
         settings.jwt_secret_key,
         algorithms=[settings.jwt_algorithm],
+        issuer=settings.jwt_issuer,
+        audience=settings.jwt_audience,
     )
     user_id = payload["sub"]
 

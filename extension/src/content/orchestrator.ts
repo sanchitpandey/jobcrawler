@@ -10,6 +10,7 @@
 
 import { detectATS } from "./ats-detector.js";
 import { showOverlay } from "../overlay/overlay.js";
+import { isFromExtensionInternal } from "../utils/message-guard.js";
 import type { Message } from "../types/index.js";
 
 // ── Site handler interface ────────────────────────────────────────────────────
@@ -35,7 +36,10 @@ async function loadHandler(platform: string): Promise<SiteHandler | null> {
 
 // ── SHOW_SCORE message from the service worker ────────────────────────────────
 
-chrome.runtime.onMessage.addListener((message: Message): void => {
+chrome.runtime.onMessage.addListener((message: Message, sender): void => {
+  // Only honour messages from our own SW/popup. A malicious tab cannot fake
+  // sender.id, so this stops same-extension spoofing.
+  if (!isFromExtensionInternal(sender)) return;
   if (message.type === "SHOW_SCORE") {
     // Suppress score overlay in batch mode — no user is watching.
     chrome.storage.local.get("batchMode").then(({ batchMode }) => {
