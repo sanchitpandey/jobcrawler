@@ -128,7 +128,11 @@ export const api = {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
 
-  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  del: <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: 'DELETE',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }),
 
   /** Attempt a silent refresh — used on app boot to rehydrate the access token. */
   refresh: tryRefresh,

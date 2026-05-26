@@ -4,6 +4,7 @@ import { ProtectedRoute } from './auth/ProtectedRoute'
 import { PublicRoute } from './auth/PublicRoute'
 import { Layout } from './components/Layout'
 import { ToastProvider } from './components/Toast'
+import { CookieBanner } from './components/CookieBanner'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -14,6 +15,7 @@ import { Applications } from './pages/Applications'
 import { ReviewQueue } from './pages/ReviewQueue'
 import { Billing } from './pages/Billing'
 import { Settings } from './pages/Settings'
+import { Privacy } from './pages/Privacy'
 import { NotFound } from './pages/NotFound'
 import { VerifyEmail } from './pages/VerifyEmail'
 import { ForgotPassword } from './pages/ForgotPassword'
@@ -28,6 +30,9 @@ function AppRoutes() {
       <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
       <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
       <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
+
+      {/* Legal — always accessible */}
+      <Route path="/privacy" element={<Privacy />} />
 
       {/* Standalone protected (no sidebar layout) */}
       <Route path="/verify-email" element={<ProtectedRoute><VerifyEmail /></ProtectedRoute>} />
@@ -55,6 +60,7 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <AppRoutes />
+          <CookieBanner />
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

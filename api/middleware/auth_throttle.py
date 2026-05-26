@@ -52,6 +52,9 @@ _IP_BUCKETS: dict[str, _Bucket] = {
     "forgot": _Bucket(window_seconds=3600, max_hits=20),
     "reset": _Bucket(window_seconds=900, max_hits=10),
     "verify": _Bucket(window_seconds=900, max_hits=20),
+    # Account export + delete. Caps per-IP so a stolen access token can't be
+    # used to repeatedly hammer either endpoint.
+    "account_destructive": _Bucket(window_seconds=3600, max_hits=10),
 }
 
 # Per-key (email / user) buckets
@@ -63,6 +66,9 @@ _KEY_BUCKETS: dict[str, _Bucket] = {
     "forgot": _Bucket(window_seconds=3600, max_hits=5),
     "reset": _Bucket(window_seconds=900, max_hits=5),
     "verify": _Bucket(window_seconds=900, max_hits=10),
+    # Per-user cap on export + delete. 5/hr lets a confused user retry a few
+    # times but stops a stolen-token loop from exfiltrating data repeatedly.
+    "account_destructive": _Bucket(window_seconds=3600, max_hits=5),
 }
 
 # {bucket_name: {key: deque[hit_timestamp]}} — in-memory fallback

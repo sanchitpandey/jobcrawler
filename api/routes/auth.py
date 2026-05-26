@@ -10,6 +10,8 @@ POST /auth/resend-verification        — issue a new verification code
 POST /auth/forgot-password            — email a reset code (always 204)
 POST /auth/reset-password-with-email  — consume reset code, set new password
 GET  /auth/me                         — return current user info
+GET  /auth/me/export                  — download a JSON archive of all user data (GDPR Art. 15 / DPDP §11)
+DELETE /auth/me                       — hard-delete the account and all user data (GDPR Art. 17 / DPDP §12)
 """
 
 import secrets
@@ -18,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import OAuth2PasswordBearer
 import jwt
 from jwt import InvalidTokenError as JWTError
@@ -32,6 +34,7 @@ from api.middleware import auth_throttle
 from api.models.base import get_db
 from api.models.user import User
 from api.services import refresh_tokens
+from api.services.account_data import delete_user_and_data, export_user_data
 from api.services.email import send_password_reset_email, send_verification_email
 from api.services.password_policy import assert_password_acceptable
 
@@ -610,3 +613,97 @@ async def reset_password_with_email(
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+# ── Data subject rights (GDPR Art. 15/17, India DPDP §11/§12) ─────────────────
+
+# Re-derived locally to avoid importing from api.routes.profiles (which imports
+# get_current_user from this module — would create a circular import).
+from pathlib import Path as _Path  # noqa: E402
+
+_UPLOAD_DIR = _Path(__file__).resolve().parents[2] / "uploads"
+
+
+class DeleteAccountRequest(BaseModel):
+    """Body for DELETE /auth/me.
+
+    ``password`` reverification stops a stolen access token from wiping the
+    account — the attacker would also need the user's password. ``confirmation``
+    is a typed-by-hand sentinel that prevents accidental destructive calls from
+    a client bug or curl-the-wrong-method.
+    """
+    password: str = Field(..., min_length=1, max_length=128)
+    confirmation: str = Field(..., description="Must equal 'DELETE MY ACCOUNT'.")
+
+
+@router.get("/me/export")
+async def export_my_data(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Return a JSON archive of every row the user owns.
+
+    Implements GDPR Art. 15 (right of access) and India DPDP §11 (right to
+    access information about personal data). Available to any authenticated
+    user — including ``is_verified=False`` — because a half-onboarded user
+    still has the right to see what we hold on them.
+    """
+    await auth_throttle.enforce(request, "account_destructive", key=current_user.id)
+    archive = await export_user_data(current_user, db)
+    filename = f"jobcrawler-export-{current_user.id}.json"
+    return JSONResponse(
+        content=archive,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_my_account(
+    req: DeleteAccountRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Hard-delete the account and every row of user data.
+
+    Implements GDPR Art. 17 (right to erasure) and India DPDP §12 (right to
+    correction and erasure). Razorpay retains payment records on their side
+    for tax compliance; see ``api/services/account_data.py`` for the cascade
+    map and the legal-retention rationale.
+
+    CSRF posture: this endpoint authenticates via the Bearer access token in
+    the Authorization header, not via the ``jc_refresh`` cookie — so the
+    Authorization header itself is the CSRF defence (cross-site fetch cannot
+    attach a custom Authorization header without preflight, which our CORS
+    config does not whitelist for arbitrary origins). The web client + the
+    extension both use Bearer, so there is no cookie-driven variant to guard.
+
+    Defence in depth:
+      * password reverification — stolen access token alone cannot wipe the account
+      * ``confirmation`` sentinel — prevents accidental client-bug deletion
+      * per-user + per-IP throttle on the ``account_destructive`` bucket
+      * all refresh tokens revoked before commit, refresh + CSRF cookies cleared
+    """
+    await auth_throttle.enforce(request, "account_destructive", key=current_user.id)
+
+    if req.confirmation != "DELETE MY ACCOUNT":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation phrase missing or incorrect.",
+        )
+
+    if not _verify_password(req.password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password reverification failed.",
+        )
+
+    await delete_user_and_data(current_user, db, _UPLOAD_DIR)
+
+    # Clear the web client's cookies on the way out. The body-bearing extension
+    # flow has no cookies; this is a no-op for it.
+    _clear_refresh_cookie(response)
+    log.info("account deleted", extra={"user_id": current_user.id})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

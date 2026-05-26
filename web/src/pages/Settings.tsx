@@ -134,24 +134,22 @@ function ChangePassword() {
 
 function ExportData() {
   const [loading, setLoading] = useState(false)
-  const [noProfile, setNoProfile] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleExport() {
     setLoading(true)
-    setNoProfile(false)
+    setError('')
     try {
-      const profile = await api.get<unknown>('/profile')
-      const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' })
+      const archive = await api.get<unknown>('/auth/me/export')
+      const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `jobcrawler-profile-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `jobcrawler-export-${new Date().toISOString().slice(0, 10)}.json`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      if (e instanceof Error && e.message.toLowerCase().includes('not found')) {
-        setNoProfile(true)
-      }
+      setError(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setLoading(false)
     }
@@ -160,22 +158,12 @@ function ExportData() {
   return (
     <div className="space-y-3">
       <p className="text-sm text-cream2">
-        Download your profile data as a JSON file. Includes all fields, skills, and preferences.
+        Download a complete archive of your account data — profile, applications, and billing history — as a JSON file.{' '}
+        <Link to="/privacy#rights" className="text-amber hover:text-amber2 underline underline-offset-2">
+          Your data rights
+        </Link>
       </p>
-      {noProfile && (
-        <div className="border border-amber/30 bg-amber/10 rounded-lg px-4 py-3 text-sm text-amber flex items-center gap-3">
-          <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span>
-            No profile yet.{' '}
-            <Link to="/onboarding" className="underline underline-offset-2 hover:text-amber2">
-              Complete onboarding
-            </Link>{' '}
-            to set up your profile first.
-          </span>
-        </div>
-      )}
+      {error && <p className="font-mono text-[11px] text-red-soft">{error}</p>}
       <button
         onClick={handleExport}
         disabled={loading}
@@ -186,7 +174,7 @@ function ExportData() {
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        {loading ? 'Exporting…' : 'Export Profile JSON'}
+        {loading ? 'Exporting…' : 'Export Data JSON'}
       </button>
     </div>
   )
@@ -197,19 +185,26 @@ function ExportData() {
 function DeleteAccount() {
   const { logout } = useAuth()
   const [showModal, setShowModal] = useState(false)
-  const [confirm, setConfirm] = useState('')
+  const [form, setForm] = useState({ password: '', confirm: '' })
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
 
+  function resetModal() {
+    setShowModal(false)
+    setForm({ password: '', confirm: '' })
+    setError('')
+  }
+
   async function handleDelete() {
-    if (confirm !== 'DELETE') {
-      setError('Type DELETE to confirm.')
+    if (!form.password) { setError('Password required.'); return }
+    if (form.confirm !== 'DELETE MY ACCOUNT') {
+      setError('Type DELETE MY ACCOUNT to confirm.')
       return
     }
     setDeleting(true)
     setError('')
     try {
-      await api.del('/auth/me')
+      await api.del('/auth/me', { password: form.password, confirmation: 'DELETE MY ACCOUNT' })
       logout()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete account')
@@ -234,7 +229,7 @@ function DeleteAccount() {
       {/* Confirmation modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShowModal(false)} />
+          <div className="absolute inset-0 bg-black/60" onClick={resetModal} />
           <div className="relative z-10 w-full max-w-md border border-line2 rounded-xl bg-ink p-6 space-y-4">
             <h3 className="font-serif text-xl text-cream">Delete account?</h3>
             <p className="text-sm text-cream2">
@@ -243,13 +238,25 @@ function DeleteAccount() {
             </p>
             <div className="space-y-1.5">
               <label className="font-mono text-[11px] uppercase tracking-wider text-cream2">
-                Type DELETE to confirm
+                Current Password
+              </label>
+              <input
+                type="password"
+                value={form.password}
+                onChange={(e) => { setForm(f => ({ ...f, password: e.target.value })); setError('') }}
+                placeholder="••••••••"
+                className="w-full h-11 px-3 rounded-lg border border-line2 bg-ink2 text-cream text-sm placeholder:text-mute focus:outline-none focus:border-red-soft/60 transition"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="font-mono text-[11px] uppercase tracking-wider text-cream2">
+                Type <span className="text-red-soft">DELETE MY ACCOUNT</span> to confirm
               </label>
               <input
                 type="text"
-                value={confirm}
-                onChange={(e) => { setConfirm(e.target.value); setError('') }}
-                placeholder="DELETE"
+                value={form.confirm}
+                onChange={(e) => { setForm(f => ({ ...f, confirm: e.target.value })); setError('') }}
+                placeholder="DELETE MY ACCOUNT"
                 className="w-full h-11 px-3 rounded-lg border border-line2 bg-ink2 text-cream text-sm placeholder:text-mute focus:outline-none focus:border-red-soft/60 transition"
               />
             </div>
@@ -263,7 +270,7 @@ function DeleteAccount() {
                 {deleting ? 'Deleting…' : 'Delete Forever'}
               </button>
               <button
-                onClick={() => { setShowModal(false); setConfirm(''); setError('') }}
+                onClick={resetModal}
                 className="h-9 px-4 rounded-lg border border-line2 text-cream2 text-sm hover:text-cream transition"
               >
                 Cancel
