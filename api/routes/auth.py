@@ -9,6 +9,7 @@ POST /auth/verify-email               — confirm signup with 6-digit code
 POST /auth/resend-verification        — issue a new verification code
 POST /auth/forgot-password            — email a reset code (always 204)
 POST /auth/reset-password-with-email  — consume reset code, set new password
+POST /auth/change-password            — change password (current-pw reverification, revokes all sessions)
 GET  /auth/me                         — return current user info
 GET  /auth/me/export                  — download a JSON archive of all user data (GDPR Art. 15 / DPDP §11)
 DELETE /auth/me                       — hard-delete the account and all user data (GDPR Art. 17 / DPDP §12)
@@ -613,6 +614,54 @@ async def reset_password_with_email(
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=12, max_length=128)
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    req: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Change the signed-in user's password.
+
+    Requires re-verifying the current password so a stolen access token alone
+    cannot pivot to permanent account takeover. On success, all existing
+    refresh-token families are revoked — other devices must re-login.
+    """
+    # Reuse the destructive bucket: throttles per-user + per-IP, same way
+    # delete-account does. Stops a stolen-token attacker from grinding through
+    # password guesses against this endpoint.
+    await auth_throttle.enforce(request, "account_destructive", key=current_user.id)
+
+    if not _verify_password(req.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Current password is incorrect.",
+        )
+
+    if req.new_password == req.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must differ from the current password.",
+        )
+
+    assert_password_acceptable(req.new_password)
+
+    current_user.hashed_password = _hash_password(req.new_password)
+    await refresh_tokens.revoke_all_for_user(db, current_user.id)
+    await db.flush()
+
+    # The current session's refresh cookie (if any) is now stale; clear it.
+    _clear_refresh_cookie(response)
+    log.info("password changed", extra={"user_id": current_user.id})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Data subject rights (GDPR Art. 15/17, India DPDP §11/§12) ─────────────────

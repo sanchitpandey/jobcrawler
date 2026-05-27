@@ -42,7 +42,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 log = get_logger(__name__)
 
 _VALID_STATUSES = frozenset({
-    "scored", "approved", "applying", "applied",
+    "discovered", "enriched", "scored", "approved", "applying", "applied",
     "interview", "offer", "rejected", "manual_review", "skipped", "error",
 })
 _VALID_VERDICTS = frozenset({"strong_yes", "yes", "maybe", "skip"})

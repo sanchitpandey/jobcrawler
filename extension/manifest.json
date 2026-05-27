@@ -11,7 +11,6 @@
     "offscreen"
   ],
   "host_permissions": [
-    "http://localhost:8000/*",
     "https://api.jobcrawler.app/*",
     "https://www.linkedin.com/*",
     "https://*.indeed.com/*",

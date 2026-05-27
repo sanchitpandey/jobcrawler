@@ -111,16 +111,19 @@ def test_development_config_allows_http_origins() -> None:
 
 @pytest.mark.asyncio
 async def test_docs_disabled_in_production(test_client: AsyncClient) -> None:
-    """In production mode the /docs endpoint must return 404."""
-    with patch("api.main.settings") as mock_settings:
-        mock_settings.app_env = "production"
-        mock_settings.allowed_origins = ["https://jobcrawler.app"]
-        mock_settings.debug = False
+    """In production mode /docs, /redoc, and /openapi.json must all be gated."""
+    from api.main import app as current_app
+    from api.config import get_settings as _gs
 
-        # The FastAPI app is already constructed with docs_url=None in production.
-        # We verify by checking the current app configuration.
-        from api.main import app as current_app
-        assert current_app.docs_url is None or current_app.docs_url == "/docs"
+    is_prod = _gs().app_env == "production"
+    if is_prod:
+        assert current_app.docs_url is None
+        assert current_app.redoc_url is None
+        assert current_app.openapi_url is None
+    else:
+        # Dev: docs should be reachable; openapi must be reachable for the SDK.
+        assert current_app.docs_url == "/docs"
+        assert current_app.openapi_url == "/openapi.json"
 
 
 @pytest.mark.asyncio

@@ -86,13 +86,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await engine.dispose()
 
 
+_is_prod = settings.app_env == "production"
 app = FastAPI(
     title="JobCrawler API",
     description="AI job application automation backend.",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.app_env != "production" else None,
+    docs_url="/docs" if not _is_prod else None,
     redoc_url=None,
+    openapi_url="/openapi.json" if not _is_prod else None,
 )
 
 # Middleware order: outermost first (security headers → CORS → logging → route handlers)

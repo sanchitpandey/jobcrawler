@@ -42,8 +42,8 @@ class Settings(BaseSettings):
         "http://localhost:5174",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
-        "https://jobcrawler.dev",
-        "https://www.jobcrawler.dev",
+        "https://jobcrawler.app",
+        "https://www.jobcrawler.app",
     ]
     # Comma-separated list of published Chrome extension IDs allowed to call the
     # API with credentials. Empty in production fails the startup check (fix #11:
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # Email (Resend)
     resend_api_key: str = ""
-    email_from: str = "JobCrawler <noreply@jobcrawler.dev>"
+    email_from: str = "JobCrawler <noreply@jobcrawler.app>"
 
     # Sentry
     sentry_dsn: str = ""
