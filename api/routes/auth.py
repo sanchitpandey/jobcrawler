@@ -27,6 +27,7 @@ import jwt
 from jwt import InvalidTokenError as JWTError
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import get_settings
@@ -319,7 +320,15 @@ async def register(
         ),
     )
     db.add(new_user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Concurrent registration with the same email won the INSERT race. The
+        # UNIQUE constraint on users.email held DB integrity; surface the same
+        # 202 the existing-email branch above returns so the response stays
+        # enum-resistant (and not a 500).
+        await db.rollback()
+        return GenericResponse(status="pending_verification")
     send_verification_email(new_user.email, code)
     return GenericResponse(status="pending_verification")
 
