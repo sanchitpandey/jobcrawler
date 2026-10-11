@@ -69,3 +69,6 @@ desktop.ini
 CLAUDE.md
 .claude/
 docs/
+
+# local resume uploads
+uploads/
